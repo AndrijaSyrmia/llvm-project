@@ -242,5 +242,7 @@ static_library("CodeGen") {
     "WasmEHPrepare.cpp",
     "WinEHPrepare.cpp",
     "XRayInstrumentation.cpp",
+
+    "DbgInstructionPrint.cpp",
   ]
 }

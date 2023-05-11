@@ -254,6 +254,8 @@ add_llvm_component_library(LLVMCodeGen
   WasmEHPrepare.cpp
   WinEHPrepare.cpp
   XRayInstrumentation.cpp
+
+  DbgInstructionPrint.cpp
   ${GeneratedMLSources}
 
   LiveDebugValues/LiveDebugValues.cpp

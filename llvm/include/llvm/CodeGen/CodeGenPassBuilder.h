@@ -825,6 +825,8 @@ Error CodeGenPassBuilder<Derived>::addCoreISelPasses(
 template <typename Derived>
 Error CodeGenPassBuilder<Derived>::addMachinePasses(
     AddMachinePass &addPass) const {
+      
+    //addPass(DbgInstructionPrintPass());
   // Add passes that optimize machine instructions in SSA form.
   if (getOptLevel() != CodeGenOpt::None) {
     derived().addMachineSSAOptimization(addPass);

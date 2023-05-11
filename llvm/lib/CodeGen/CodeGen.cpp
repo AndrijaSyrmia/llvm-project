@@ -140,4 +140,6 @@ void llvm::initializeCodeGen(PassRegistry &Registry) {
   initializeWasmEHPreparePass(Registry);
   initializeWinEHPreparePass(Registry);
   initializeXRayInstrumentationPass(Registry);
+
+  initializeDbgInstructionPrintPass(Registry);
 }
