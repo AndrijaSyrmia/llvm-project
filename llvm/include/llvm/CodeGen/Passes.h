@@ -375,6 +375,8 @@ namespace llvm {
   /// This pass implements the "patchable-function" attribute.
   extern char &PatchableFunctionID;
 
+  extern char& DbgInstructionPrintID;
+
   /// createStackProtectorPass - This pass adds stack protectors to functions.
   ///
   FunctionPass *createStackProtectorPass();
@@ -438,6 +440,7 @@ namespace llvm {
 
   /// LiveDebugValues pass
   extern char &LiveDebugValuesID;
+
 
   /// createJumpInstrTables - This pass creates jump-instruction tables.
   ModulePass *createJumpInstrTablesPass();
