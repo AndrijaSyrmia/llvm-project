@@ -256,6 +256,7 @@ add_llvm_component_library(LLVMCodeGen
   XRayInstrumentation.cpp
 
   DbgInstructionPrint.cpp
+  DbgInstructionDelete.cpp
   ${GeneratedMLSources}
 
   LiveDebugValues/LiveDebugValues.cpp

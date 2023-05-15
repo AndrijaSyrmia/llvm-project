@@ -13,6 +13,7 @@
 
 #include "llvm/InitializePasses.h"
 #include "llvm/PassRegistry.h"
+#include "llvm/CodeGen/initializeDbgInstructionDelete.h" //dodato zbog DbgInstructionDelete
 
 using namespace llvm;
 
@@ -142,4 +143,5 @@ void llvm::initializeCodeGen(PassRegistry &Registry) {
   initializeXRayInstrumentationPass(Registry);
 
   initializeDbgInstructionPrintPass(Registry);
+  initializeDbgInstructionDeletePass(Registry);
 }

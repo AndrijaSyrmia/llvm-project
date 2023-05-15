@@ -210,4 +210,5 @@ DUMMY_MACHINE_FUNCTION_PASS("machine-uniformity", MachineUniformityInfoWrapperPa
 DUMMY_MACHINE_FUNCTION_PASS("print-machine-uniformity", MachineUniformityInfoPrinterPass, ())
 
 DUMMY_MACHINE_FUNCTION_PASS("dbg-ins-print", DbgInstructionPrintPass, ())
+DUMMY_MACHINE_FUNCTION_PASS("dbg_ins-delete", DbgInstructionDeletePass, ())
 #undef DUMMY_MACHINE_FUNCTION_PASS
