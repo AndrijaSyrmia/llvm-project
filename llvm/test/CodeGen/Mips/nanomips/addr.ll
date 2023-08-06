@@ -3,7 +3,7 @@
 
 @b = external dso_local local_unnamed_addr global [0 x i32], align 4
 
-define dso_local void @foo(i32* nocapture readonly %a) local_unnamed_addr {
+define dso_local void @foo(i32* nocapture readonly %a) local_unnamed_addr optsize {
 ; CHECK-LABEL: foo:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    save 16, $ra
@@ -25,7 +25,7 @@ entry:
 
 declare dso_local void @sink(i32 signext, i32 signext) local_unnamed_addr
 
-define dso_local void @bar() local_unnamed_addr {
+define dso_local void @bar() local_unnamed_addr optsize {
 ; CHECK-LABEL: bar:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    save 16, $ra
