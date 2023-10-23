@@ -144,16 +144,35 @@ struct RelExprMaskBuilder<Head, Tail...> {
     return (uint64_t(1) << Head) | RelExprMaskBuilder<Tail...>::build();
   }
 };
+
+// New 128 bit mask implementation, there are two 64 bit submasks for this
+template <int32_t... Exprs> struct RelExprMask128BitBuilder {
+  static inline uint64_t build() { return 0; }
+};
+template <int32_t Head, int32_t... Tail> 
+struct RelExprMask128BitBuilder<Head, Tail...> { 
+  static inline uint64_t build()
+  {
+    static_assert(-64 <= Head && Head < 128, "RelExpr is too large for 128-bit mask!");
+    return ((Head < 0 || Head >= 64) ? 0 : uint64_t(1) << Head) | RelExprMask128BitBuilder<Tail...>::build();
+  }
+};
+
 } // namespace
 
 // Return true if `Expr` is one of `Exprs`.
 // There are fewer than 64 RelExpr's, so we can represent any set of
 // RelExpr's as a constant bit mask and test for membership with a
 // couple cheap bitwise operations.
+// TODO: As new relocations were added, mask is extended to 128 bit,
+// make this expression nicer
 template <RelExpr... Exprs> bool oneof(RelExpr expr) {
-  assert(0 <= expr && (int)expr < 64 &&
-         "RelExpr is too large for 64-bit mask!");
-  return (uint64_t(1) << expr) & RelExprMaskBuilder<Exprs...>::build();
+  assert(0 <= expr && (int)expr < 128 &&
+         "RelExpr is too large for 128-bit mask!");
+  if(expr >= 64)
+    return (uint64_t(1) << (expr - 64)) & RelExprMask128BitBuilder<((int32_t)Exprs - 64)...>::build();
+  else
+    return (uint64_t(1) << expr) & RelExprMask128BitBuilder<Exprs...>::build();
 }
 
 // This function is similar to the `handleTlsRelocation`. MIPS does not
@@ -391,7 +410,7 @@ static bool needsGot(RelExpr expr) {
 static bool isRelExpr(RelExpr expr) {
   return oneof<R_PC, R_GOTREL, R_GOTPLTREL, R_MIPS_GOTREL, R_PPC64_CALL,
                R_PPC64_RELAX_TOC, R_AARCH64_PAGE_PC, R_RELAX_GOT_PC,
-               R_RISCV_PC_INDIRECT, R_PPC64_RELAX_GOT_PC>(expr);
+               R_RISCV_PC_INDIRECT, R_PPC64_RELAX_GOT_PC, R_NANOMIPS_PAGE_PC, R_NANOMIPS_GPREL>(expr);
 }
 
 // Returns true if a given relocation can be computed at link-time.
@@ -413,10 +432,9 @@ static bool isStaticLinkTimeConstant(RelExpr e, RelType type, const Symbol &sym,
             R_PLT_PC, R_TLSGD_GOT, R_TLSGD_GOTPLT, R_TLSGD_PC, R_PPC32_PLTREL,
             R_PPC64_CALL_PLT, R_PPC64_RELAX_TOC, R_RISCV_ADD, R_TLSDESC_CALL,
             R_TLSDESC_PC, R_AARCH64_TLSDESC_PAGE, R_TLSLD_HINT, R_TLSIE_HINT,
-            R_AARCH64_GOT_PAGE>(
+            R_AARCH64_GOT_PAGE, R_NANOMIPS_GPREL, R_NANOMIPS_NEG_COMPOSITE, R_NANOMIPS_PAGE_PC>(
           e))
     return true;
-
   // These never do, except if the entire file is position dependent or if
   // only the low bits are used.
   if (e == R_GOT || e == R_PLT || e == R_TLSDESC)
@@ -983,9 +1001,8 @@ static bool maybeReportUndefined(Symbol &sym, InputSectionBase &sec,
   // because .LC0-.LTOC is not representable if the two labels are in different
   // .got2
   if (cast<Undefined>(sym).discardedSecIdx != 0 &&
-      (sec.name == ".got2" || sec.name == ".toc"))
+      (sec.name == ".got2" || sec.name == ".toc" || sec.name == ".eh_frame"))
     return false;
-
   bool isWarning =
       (config->unresolvedSymbols == UnresolvedPolicy::Warn && canBeExternal) ||
       config->noinhibitExec;
