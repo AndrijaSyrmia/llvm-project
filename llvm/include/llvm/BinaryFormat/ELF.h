@@ -979,6 +979,8 @@ enum : unsigned {
   SHT_MIPS_DWARF = 0x7000001e,    // DWARF debugging section.
   SHT_MIPS_ABIFLAGS = 0x7000002a, // ABI information.
 
+  SHT_NANOMIPS_ABIFLAGS = 0x70000000U, // ABI information
+
   SHT_MSP430_ATTRIBUTES = 0x70000003U,
 
   SHT_RISCV_ATTRIBUTES = 0x70000003U,
@@ -1327,6 +1329,9 @@ enum {
   PT_MIPS_RTPROC = 0x70000001,   // Runtime procedure table.
   PT_MIPS_OPTIONS = 0x70000002,  // Options segment.
   PT_MIPS_ABIFLAGS = 0x70000003, // Abiflags segment.
+
+  // nanoMIPS program header types
+  PT_NANOMIPS_ABIFLAGS = 0x70000000 // Abiflags segment;
 };
 
 // Segment flag bits.
