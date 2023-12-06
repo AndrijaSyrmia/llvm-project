@@ -889,8 +889,9 @@ void InputSection::relocateNonAlloc(uint8_t *buf, ArrayRef<RelTy> rels) {
       break;
     }
 
-  for(size_t i = 0, size = rels.size(); i != size; ++i) {
-    const RelTy &rel = rels[i];
+  // for(size_t i = 0, size = rels.size(); i != size; ++i) {
+  for(auto it = rels.begin(), end = rels.end(); it != end; it++) {  
+    const RelTy &rel = *it;
     RelType type = rel.getType(config->isMips64EL);
 
     // GCC 8.0 or earlier have a bug that they emit R_386_GOTPC relocations
@@ -991,72 +992,75 @@ void InputSection::relocateNonAlloc(uint8_t *buf, ArrayRef<RelTy> rels) {
     }
 
     if (expr == R_NANOMIPS_NEG_COMPOSITE){
-        assert(i + 1 <= size);
-        assert(type == R_NANOMIPS_NEG);
-        uint64_t targetVA = SignExtend64(
-            getRelocTargetVA(file, type, addend, addrLoc, sym, expr),
-            bits);
-        const RelTy &nxt1 = rels[++i];
-        RelType type1 = nxt1.getType(config->isMips64EL);
-        uint64_t offset1 = nxt1.r_offset;
-        uint8_t *bufLoc1 = buf + offset1;
-        int64_t addend1 = getAddend<ELFT>(nxt1);
-        Symbol &sym1 = getFile<ELFT>()->getRelocTargetSym(nxt1);
-        RelExpr expr1 = target->getRelExpr(type1, sym1, bufLoc1);
-        if (type1 == R_NANOMIPS_ASHIFTR_1){
-          assert(i + 1 <= size);
-          const RelTy &nxt2 = rels[++i];
-          RelType type2 = nxt2.getType(config->isMips64EL);
-          uint64_t offset2 = nxt2.r_offset;
-          uint8_t *bufLoc2 = buf + offset2;
-          int64_t addend2 = getAddend<ELFT>(nxt2);
-          Symbol &sym2 = getFile<ELFT>()->getRelocTargetSym(nxt2);
-          RelExpr expr2 = target->getRelExpr(type2, sym2, bufLoc2);
+        uint64_t data = getNanoMipsNegCompositeRelDataNonAlloc<ELFT, RelTy>(it, end, bufLoc, buf, this, file, addrLoc, target);
+        target->relocateNoSym(bufLoc, (*it).getType(config->isMips64EL), data);
+        continue;
+        // assert(i + 1 <= size);
+        // assert(type == R_NANOMIPS_NEG);
+        // uint64_t targetVA = SignExtend64(
+        //     getRelocTargetVA(file, type, addend, addrLoc, sym, expr),
+        //     bits);
+        // const RelTy &nxt1 = rels[++i];
+        // RelType type1 = nxt1.getType(config->isMips64EL);
+        // uint64_t offset1 = nxt1.r_offset;
+        // uint8_t *bufLoc1 = buf + offset1;
+        // int64_t addend1 = getAddend<ELFT>(nxt1);
+        // Symbol &sym1 = getFile<ELFT>()->getRelocTargetSym(nxt1);
+        // RelExpr expr1 = target->getRelExpr(type1, sym1, bufLoc1);
+        // if (type1 == R_NANOMIPS_ASHIFTR_1){
+        //   assert(i + 1 <= size);
+        //   const RelTy &nxt2 = rels[++i];
+        //   RelType type2 = nxt2.getType(config->isMips64EL);
+        //   uint64_t offset2 = nxt2.r_offset;
+        //   uint8_t *bufLoc2 = buf + offset2;
+        //   int64_t addend2 = getAddend<ELFT>(nxt2);
+        //   Symbol &sym2 = getFile<ELFT>()->getRelocTargetSym(nxt2);
+        //   RelExpr expr2 = target->getRelExpr(type2, sym2, bufLoc2);
 
-          if((bufLoc != bufLoc1) || (bufLoc != bufLoc2)) {
-            message("Incorrect logic for negative and shift\n");
-            exit(6);
-          }
-          const uint64_t targetVA1 =
-              SignExtend64(getRelocTargetVA(file, type1, addend1, addrLoc,
-                                      sym1, expr1),
-                          bits);
-          const uint64_t targetVA2 =
-              SignExtend64(getRelocTargetVA(file, type2, addend2, addrLoc,
-                                      sym2, expr2),
-                          bits);
-          if(type2 == R_NANOMIPS_SIGNED_8 || type2 == R_NANOMIPS_SIGNED_16) {
-            uint64_t data1 = SignExtend64(((targetVA1 + targetVA) >> 1), bits);
-            data1 = data1 + targetVA2;
-            target->relocateNoSym(bufLoc2, type2, data1);
-            continue;
-          }else {
-            uint64_t data1 = ((targetVA1 + targetVA) >> 1);
-            uint64_t data = data1 + targetVA2;
-            target->relocateNoSym(bufLoc2, type2, data);
-            continue;
-          }
-        }
+        //   if((bufLoc != bufLoc1) || (bufLoc != bufLoc2)) {
+        //     message("Incorrect logic for negative and shift\n");
+        //     exit(6);
+        //   }
+        //   const uint64_t targetVA1 =
+        //       SignExtend64(getRelocTargetVA(file, type1, addend1, addrLoc,
+        //                               sym1, expr1),
+        //                   bits);
+        //   const uint64_t targetVA2 =
+        //       SignExtend64(getRelocTargetVA(file, type2, addend2, addrLoc,
+        //                               sym2, expr2),
+        //                   bits);
+        //   if(type2 == R_NANOMIPS_SIGNED_8 || type2 == R_NANOMIPS_SIGNED_16) {
+        //     uint64_t data1 = SignExtend64(((targetVA1 + targetVA) >> 1), bits);
+        //     data1 = data1 + targetVA2;
+        //     target->relocateNoSym(bufLoc2, type2, data1);
+        //     continue;
+        //   }else {
+        //     uint64_t data1 = ((targetVA1 + targetVA) >> 1);
+        //     uint64_t data = data1 + targetVA2;
+        //     target->relocateNoSym(bufLoc2, type2, data);
+        //     continue;
+        //   }
+        // }
 
-        if (type1 != R_NANOMIPS_ASHIFTR_1) {
-          if(bufLoc != bufLoc1) {
-            message("Incorrect logic for negative\n");
-            exit(6);
-          }
-          const uint64_t targetVA1 =
-              SignExtend64(getRelocTargetVA(file, type1, addend1, addrLoc,
-                                      sym1, expr1),
-                            bits);
-          if (type1 == R_NANOMIPS_SIGNED_8 || type1 == R_NANOMIPS_SIGNED_16) {
-            uint64_t data = SignExtend64((targetVA1 + targetVA), bits);
-            target->relocateNoSym(bufLoc1, type1, data);
-            continue;
-          }else{
-            uint64_t data =targetVA1 + targetVA;
-            target->relocateNoSym(bufLoc1, type1, data);
-            continue;
-          }
-        }
+        // if (type1 != R_NANOMIPS_ASHIFTR_1) {
+        //   if(bufLoc != bufLoc1) {
+        //     message("Incorrect logic for negative\n");
+        //     exit(6);
+        //   }
+        //   const uint64_t targetVA1 =
+        //       SignExtend64(getRelocTargetVA(file, type1, addend1, addrLoc,
+        //                               sym1, expr1),
+        //                     bits);
+        //   if (type1 == R_NANOMIPS_SIGNED_8 || type1 == R_NANOMIPS_SIGNED_16) {
+        //     uint64_t data = SignExtend64((targetVA1 + targetVA), bits);
+        //     target->relocateNoSym(bufLoc1, type1, data);
+        //     continue;
+        //   }else{
+        //     uint64_t data =targetVA1 + targetVA;
+        //     target->relocateNoSym(bufLoc1, type1, data);
+        //     continue;
+        //   }
+        // }
       }
     
     target->relocateNoSym(bufLoc, type, SignExtend64<bits>(sym.getVA(addend)));
@@ -1104,8 +1108,9 @@ void InputSectionBase::relocateAlloc(uint8_t *buf, uint8_t *bufEnd) {
   const unsigned bits = config->wordsize * 8;
   uint64_t lastPPCRelaxedRelocOff = UINT64_C(-1);
 
-  for (size_t i = 0, size = relocations.size(); i != size; ++i) {
-    const Relocation &rel = relocations[i];
+  // for (size_t i = 0, size = relocations.size(); i != size; ++i) {
+  for(auto it = relocations.begin(), end = relocations.end(); it != end; it++) {
+    const Relocation &rel = *it;
     if (rel.expr == R_NONE)
       continue;
     uint64_t offset = rel.offset;
@@ -1192,62 +1197,65 @@ void InputSectionBase::relocateAlloc(uint8_t *buf, uint8_t *bufEnd) {
       target->relocate(bufLoc, rel, targetVA);
       break;
    case R_NANOMIPS_NEG_COMPOSITE: {
-      assert(i + 1 <= size); // incorrect logic for negative composite relocations
-      assert(type == R_NANOMIPS_NEG);
-      Relocation &nxt1 = relocations[++i]; 
-      uint64_t offset1 = nxt1.offset;
-      uint8_t *bufLoc1 = buf + offset1;
-      if (nxt1.type == R_NANOMIPS_ASHIFTR_1) {
-        assert(i + 1 <= size); // incorrect logic for negative and shift
-        Relocation &nxt2 = relocations[++i];
-        uint64_t offset2 = nxt2.offset;
-        uint8_t *bufLoc1 = buf + nxt1.offset;
-        uint8_t *bufLoc2 = buf + nxt2.offset;
-        if((bufLoc != bufLoc1) || (bufLoc != bufLoc2)){
-          message("Incorrect logic for negative and shift\n");
-          exit(6);
-        }
-        const uint64_t targetVA1 =
-            SignExtend64(getRelocTargetVA(file, nxt1.type, nxt1.addend, addrLoc,
-                                      *nxt1.sym, nxt1.expr),
-                          bits);
-        const uint64_t targetVA2 =
-            SignExtend64(getRelocTargetVA(file, nxt2.type, nxt2.addend, addrLoc,
-                                      *nxt2.sym, nxt2.expr),
-                          bits);
-        /*uint64_t data1 = ((targetVA1 + targetVA) >> 1);
-        uint64_t data = data1 + targetVA2;
-        target->relocate(bufLoc2, nxt2, data);*/
-        if(nxt2.type == R_NANOMIPS_SIGNED_8 || nxt2.type == R_NANOMIPS_SIGNED_16){
-          uint64_t data1 = SignExtend64(((targetVA1 + targetVA) >> 1), bits);
-          data1 = data1 + targetVA2;
-          target->relocate(bufLoc2, nxt2, data1);
-        }else {
-          uint64_t data1 = ((targetVA1 + targetVA) >> 1);
-          uint64_t data = data1 + targetVA2;
-          target->relocate(bufLoc2, nxt2, data);
-        }
-      }
-      if (nxt1.type != R_NANOMIPS_ASHIFTR_1) {
-        uint8_t *bufLoc1 = buf + nxt1.offset;
-        if(bufLoc != bufLoc1){
-          message("Incorrect logic for negative\n");
-          exit(6);
-        }
-        const uint64_t targetVA1 =
-            SignExtend64(getRelocTargetVA(file, nxt1.type, nxt1.addend, addrLoc,
-                                      *nxt1.sym, nxt1.expr),
-                          bits);
-        if (nxt1.type == R_NANOMIPS_SIGNED_8 || nxt1.type == R_NANOMIPS_SIGNED_16){
-          uint64_t data = SignExtend64((targetVA1 + targetVA), bits);
-          target->relocate(bufLoc1, nxt1, data);
-        }else{
-          uint64_t data =targetVA1 + targetVA;
-          target->relocate(bufLoc1, nxt1, data);
-        }
-       
-      }
+      uint64_t data = getNanoMipsNegCompositeRelDataAlloc(it, end, bufLoc, buf, this, file, addrLoc);
+      target->relocate(bufLoc, *it, data);
       break;
+      // assert(i + 1 <= size); // incorrect logic for negative composite relocations
+      // assert(type == R_NANOMIPS_NEG);
+      // Relocation &nxt1 = relocations[++i]; 
+      // uint64_t offset1 = nxt1.offset;
+      // uint8_t *bufLoc1 = buf + offset1;
+      // if (nxt1.type == R_NANOMIPS_ASHIFTR_1) {
+      //   assert(i + 1 <= size); // incorrect logic for negative and shift
+      //   Relocation &nxt2 = relocations[++i];
+      //   uint64_t offset2 = nxt2.offset;
+      //   uint8_t *bufLoc1 = buf + nxt1.offset;
+      //   uint8_t *bufLoc2 = buf + nxt2.offset;
+      //   if((bufLoc != bufLoc1) || (bufLoc != bufLoc2)){
+      //     message("Incorrect logic for negative and shift\n");
+      //     exit(6);
+      //   }
+      //   const uint64_t targetVA1 =
+      //       SignExtend64(getRelocTargetVA(file, nxt1.type, nxt1.addend, addrLoc,
+      //                                 *nxt1.sym, nxt1.expr),
+      //                     bits);
+      //   const uint64_t targetVA2 =
+      //       SignExtend64(getRelocTargetVA(file, nxt2.type, nxt2.addend, addrLoc,
+      //                                 *nxt2.sym, nxt2.expr),
+      //                     bits);
+      //   /*uint64_t data1 = ((targetVA1 + targetVA) >> 1);
+      //   uint64_t data = data1 + targetVA2;
+      //   target->relocate(bufLoc2, nxt2, data);*/
+      //   if(nxt2.type == R_NANOMIPS_SIGNED_8 || nxt2.type == R_NANOMIPS_SIGNED_16){
+      //     uint64_t data1 = SignExtend64(((targetVA1 + targetVA) >> 1), bits);
+      //     data1 = data1 + targetVA2;
+      //     target->relocate(bufLoc2, nxt2, data1);
+      //   }else {
+      //     uint64_t data1 = ((targetVA1 + targetVA) >> 1);
+      //     uint64_t data = data1 + targetVA2;
+      //     target->relocate(bufLoc2, nxt2, data);
+      //   }
+      // }
+      // if (nxt1.type != R_NANOMIPS_ASHIFTR_1) {
+      //   uint8_t *bufLoc1 = buf + nxt1.offset;
+      //   if(bufLoc != bufLoc1){
+      //     message("Incorrect logic for negative\n");
+      //     exit(6);
+      //   }
+      //   const uint64_t targetVA1 =
+      //       SignExtend64(getRelocTargetVA(file, nxt1.type, nxt1.addend, addrLoc,
+      //                                 *nxt1.sym, nxt1.expr),
+      //                     bits);
+      //   if (nxt1.type == R_NANOMIPS_SIGNED_8 || nxt1.type == R_NANOMIPS_SIGNED_16){
+      //     uint64_t data = SignExtend64((targetVA1 + targetVA), bits);
+      //     target->relocate(bufLoc1, nxt1, data);
+      //   }else{
+      //     uint64_t data =targetVA1 + targetVA;
+      //     target->relocate(bufLoc1, nxt1, data);
+      //   }
+       
+      // }
+      // break;
     }
     default:
       target->relocate(bufLoc, rel, targetVA);
