@@ -209,7 +209,6 @@ def mark_excluded(discovered_tests, selected_tests):
 
 def run_tests(tests, lit_config, opts, discovered_tests):
     workers = min(len(tests), opts.workers)
-    # workers = 1
     display = lit.display.create_display(opts, tests, discovered_tests, workers)
 
     run = lit.run.Run(tests, lit_config, workers, display.update,
