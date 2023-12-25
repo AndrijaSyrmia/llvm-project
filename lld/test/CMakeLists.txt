@@ -41,6 +41,17 @@ if (LLVM_INCLUDE_TESTS)
   list(APPEND LLD_TEST_DEPS LLDUnitTests)
 endif()
 
+file(GLOB NANOMIPS_TESTS CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/ELF/nanomips*
+)
+
+# message(NANOMIPS_TESTS="${NANOMIPS_TESTS}")
+
+add_lit_testsuite(check-lld-nanomips "Running lld nanomips test suite"
+    ${NANOMIPS_TESTS}
+    DEPENDS ${LLD_TEST_DEPS}
+)
+
 add_lit_testsuite(check-lld "Running lld test suite"
   ${CMAKE_CURRENT_BINARY_DIR}
   DEPENDS ${LLD_TEST_DEPS}

@@ -1740,13 +1740,22 @@ template <class ELFT> void Writer<ELFT>::finalizeAddressDependentContent() {
     hexagonTLSSymbolUpdate(outputSections);
 
   int assignPasses = 0;
+  uint32_t pass = 0;
   for (;;) {
-    bool changed = target->needsThunks && tc.createThunks(outputSections);
+    bool changed = target->needsThunks ? tc.createThunks(outputSections) : target->relaxOnce(pass);
+    ++pass;
 
     // With Thunk Size much smaller than branch range we expect to
     // converge quickly; if we get to 15 something has gone wrong.
     if (changed && tc.pass >= 15) {
       error("thunk creation not converged");
+      break;
+    }
+
+    // If relaxation doesn't converge within 30 iterations, break it
+    if (changed && pass >= 30)
+    {
+      error("relaxation not converged");
       break;
     }
 

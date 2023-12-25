@@ -505,7 +505,19 @@ enum {
 #include "ELFRelocs/AVR.def"
 };
 
-//ELF Relocation types for nanoMips
+// nanoMIPS processor specific flags
+enum: unsigned {
+  EF_NANOMIPS_LINKRELAX = 0x00000001,
+  EF_NANOMIPS_PIC = 0x00000002,
+  EF_NANOMIPS_32BITMODE = 0x00000004,
+  EF_NANOMIPS_PID = 0x00000008,
+  EF_NANOMIPS_PCREL = 0x00000010,
+  EF_NANOMIPS_ABI = 0x0000F000,
+  EF_NANOMIPS_MACH = 0x00FF0000,
+  EF_NANOMIPS_ARCH = 0xF0000000
+};
+
+//ELF Relocation types for nanoMIPS
 enum{
 #include "ELFRelocs/NanoMips.def"
 };

@@ -695,7 +695,7 @@ def: F<"no-copy-dt-needed-entries">;
 def: F<"no-ctors-in-init-array">;
 def: F<"no-keep-memory">;
 def: F<"no-pipeline-knowledge">;
-def: F<"no-relax">;
+// def: F<"no-relax">;
 def: F<"no-warn-mismatch">;
 def: Flag<["-"], "p">;
 def: Separate<["--", "-"], "rpath-link">;
@@ -708,6 +708,14 @@ def: F<"warn-once">;
 def: F<"warn-shared-textrel">;
 def: JoinedOrSeparate<["-"], "G">;
 def: F<"Qy">;
+
+defm relax: BB<"relax", 
+    "(nanoMIPS only for now) Perform code relaxation", 
+    "(nanoMIPS only for now) Do not perform code relaxation (default)">;
+
+defm expand: BB<"expand",
+    "(nanoMIPS only) Perform code expansion (default)",
+    "(nanoMIPS only) Do not perform code expansion">;
 
 // Hidden option used for testing MIPS multi-GOT implementation.
 defm mips_got_size:

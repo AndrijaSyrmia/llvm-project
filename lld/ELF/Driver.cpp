@@ -1047,6 +1047,7 @@ static void readConfigs(opt::InputArgList &args) {
 
   config->executeOnly =
       args.hasFlag(OPT_execute_only, OPT_no_execute_only, false);
+  config->expand = args.hasFlag(OPT_expand, OPT_no_expand, true);
   config->exportDynamic =
       args.hasFlag(OPT_export_dynamic, OPT_no_export_dynamic, false);
   config->filterList = args::getStrings(args, OPT_filter);
@@ -1127,6 +1128,7 @@ static void readConfigs(opt::InputArgList &args) {
   config->printSymbolOrder =
       args.getLastArgValue(OPT_print_symbol_order);
   config->rpath = getRpath(args);
+  config->relax = args.hasFlag(OPT_relax, OPT_no_relax, false);
   config->relocatable = args.hasArg(OPT_relocatable);
   config->saveTemps = args.hasArg(OPT_save_temps);
   config->searchPaths = args::getStrings(args, OPT_library_path);
