@@ -174,6 +174,26 @@ void InputSectionBase::uncompress() const {
   uncompressedSize = -1;
 }
 
+void InputSectionBase::increaseSizeOfSection(uint64_t delta)
+{
+  size_t size = rawData.size() + delta;
+  char* increasedData;
+  {
+    static std::mutex mu;
+    std::lock_guard<std::mutex> lock(mu);
+    increasedData = bAlloc.Allocate<char>(size);
+  }
+
+  if(increasedData == nullptr) fatal(toString(this) + "allocation of new size failed");
+  for(uint64_t i = 0; i < rawData.size(); i++)
+  {
+    increasedData[i] = rawData[i];
+  }
+
+  rawData = makeArrayRef((uint8_t *)increasedData, size);
+  bytesDropped += delta;
+}
+
 uint64_t InputSectionBase::getOffsetInFile() const {
   const uint8_t *fileStart = (const uint8_t *)file->mb.getBufferStart();
   const uint8_t *secStart = data().begin();

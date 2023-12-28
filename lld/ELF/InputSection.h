@@ -145,6 +145,9 @@ public:
     bytesDropped -= num;
   }
 
+  // TODO: make this better, it is meant for nanoMIPS expansions if this is necessary
+  void increaseSizeOfSection(uint64_t delta);
+
   void trim() {
     if (bytesDropped) {
       rawData = rawData.drop_back(bytesDropped);
