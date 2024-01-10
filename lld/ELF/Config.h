@@ -188,6 +188,8 @@ struct Configuration {
   bool mergeArmExidx;
   bool mipsN32Abi = false;
   bool mmapOutputFile;
+  bool nanoMipsInsn32;
+  bool nanoMipsRelaxLo12;
   bool nmagic;
   bool noDynamicLinker = false;
   bool noinhibitExec;
