@@ -18,10 +18,10 @@ ELF_RELOC(R_NANOMIPS_PC10_S1,                17)
 ELF_RELOC(R_NANOMIPS_PC7_S1,                 18)
 ELF_RELOC(R_NANOMIPS_PC4_S1,                 19)
 ELF_RELOC(R_NANOMIPS_GPREL19_S2,             20)   
-//ELF_RELOC(R_NANOMIPS_GPREL18_S3,             21)  //ne postoji
+//ELF_RELOC(R_NANOMIPS_GPREL18_S3,             21)  //doesn't exist
 ELF_RELOC(R_NANOMIPS_GPREL18,                22)    
 ELF_RELOC(R_NANOMIPS_GPREL17_S1,             23)    
-ELF_RELOC(R_NANOMIPS_GPREL16_S2,             24)  //nije implementirana ne znam zasto
+ELF_RELOC(R_NANOMIPS_GPREL16_S2,             24)  //not implemented don't know why
 ELF_RELOC(R_NANOMIPS_GPREL7_S2,              25)
 ELF_RELOC(R_NANOMIPS_GPREL_HI20,             26)    
 ELF_RELOC(R_NANOMIPS_GPREL_I32,              30)    
@@ -33,5 +33,7 @@ ELF_RELOC(R_NANOMIPS_PC_I32,                 31)
 ELF_RELOC(R_NANOMIPS_I32,                    32)
 ELF_RELOC(R_NANOMIPS_COPY,                   44)
 ELF_RELOC(R_NANOMIPS_ALIGN,                  64)
+ELF_RELOC(R_NANOMIPS_INSN32,                 67)
 ELF_RELOC(R_NANOMIPS_FIXED,                  68)
+ELF_RELOC(R_NANOMIPS_INSN16,                 72)
 ELF_RELOC(R_NANOMIPS_PC32,                  248)

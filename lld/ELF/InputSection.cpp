@@ -174,24 +174,70 @@ void InputSectionBase::uncompress() const {
   uncompressedSize = -1;
 }
 
-void InputSectionBase::increaseSizeOfSection(uint64_t delta)
+// void InputSectionBase::increaseSizeOfSection(uint64_t delta)
+// {
+//   size_t size = rawData.size() + delta;
+//   char* increasedData;
+//   {
+//     static std::mutex mu;
+//     std::lock_guard<std::mutex> lock(mu);
+//     // TODO: Check if this can eat up a lot of memory
+//     // as bptr allocator only allocates, it doesn't free
+//     // the memory
+//     increasedData = bAlloc.Allocate<char>(size);
+//   }
+
+//   if(increasedData == nullptr) fatal(toString(this) + "allocation of new size failed");
+//   for(uint64_t i = 0; i < rawData.size(); i++)
+//   {
+//     increasedData[i] = rawData[i];
+//   }
+
+//   rawData = makeArrayRef((uint8_t *)increasedData, size);
+//   bytesDropped += delta;
+// }
+
+void InputSectionBase::addBytes(uint64_t location, uint32_t count)
 {
-  size_t size = rawData.size() + delta;
-  char* increasedData;
+  assert(location < rawData.size() - bytesDropped && "Location mustn't be larger than size of section");
+  assert(count > 0 && "Number of new bytes must be larger than 0");
+  if(count > bytesDropped)
   {
-    static std::mutex mu;
-    std::lock_guard<std::mutex> lock(mu);
-    increasedData = bAlloc.Allocate<char>(size);
-  }
+    // Allocate more data just in case
+    size_t size = (rawData.size() + count - bytesDropped) * 2;
+    uint8_t *increasedData;
+    {
+      static std::mutex mu;
+      std::lock_guard<std::mutex> lock(mu);
+      // TODO: Check if this can eat up a lot of memory
+      // as bptr allocator only allocates, it doesn't free
+    // the memory
+      increasedData = bAlloc.Allocate<uint8_t>(size);
+    }
 
-  if(increasedData == nullptr) fatal(toString(this) + "allocation of new size failed");
-  for(uint64_t i = 0; i < rawData.size(); i++)
-  {
-    increasedData[i] = rawData[i];
-  }
+    if(increasedData == nullptr) fatal(toString(this) + " allocation of new size failed");
+    
+    memcpy(increasedData, rawData.begin(), location);
+    memcpy(increasedData + location + count, rawData.begin() + location, rawData.size() - bytesDropped - location);
 
-  rawData = makeArrayRef((uint8_t *)increasedData, size);
-  bytesDropped += delta;
+    // Hope this is not concurrent
+    bytesDropped = rawData.size() + count - bytesDropped;
+    rawData = makeArrayRef((uint8_t *)increasedData, size);
+  }
+  else {
+    // TODO: See this can be done backwards as well, maybe that is faster
+    memmove(const_cast<uint8_t *>(rawData.begin()) + location + count, rawData.begin() + location, rawData.size() - bytesDropped - location);
+    bytesDropped -= count;
+  }
+}
+
+void InputSectionBase::deleteBytes(uint64_t location, uint32_t count)
+{
+  assert(location < rawData.size() - bytesDropped && "Location mustn't be larger than size of section");
+  assert(count < rawData.size() - bytesDropped && count > 0 && "Number of deleted bytes must be larger than 0 and less than size of section");
+
+  bytesDropped += count;
+  memmove(const_cast<uint8_t *>(rawData.begin()) + location - count, rawData.begin() + location, rawData.size() - bytesDropped - location);
 }
 
 uint64_t InputSectionBase::getOffsetInFile() const {

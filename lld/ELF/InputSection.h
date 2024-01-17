@@ -145,8 +145,15 @@ public:
     bytesDropped -= num;
   }
 
-  // TODO: make this better, it is meant for nanoMIPS expansions if this is necessary
-  void increaseSizeOfSection(uint64_t delta);
+  // // TODO: make this better, it is meant for nanoMIPS expansions if this is necessary
+  // // Shouldn't be necessary
+  // void increaseSizeOfSection(uint64_t delta);
+
+  // Note: used for nanoMIPS expansions
+  void addBytes(uint64_t location, uint32_t count);
+
+  // Note: used for nanoMIPS relaxations
+  void deleteBytes(uint64_t location, uint32_t count);
 
   void trim() {
     if (bytesDropped) {
