@@ -45,6 +45,8 @@ struct NanoMipsRelaxAux;
 // input files, some are sections in the produced output file and some exist
 // just as a convenience for implementing special ways of combining some
 // sections.
+
+struct NanoMipsRelaxAux;
 class SectionBase {
 public:
   enum Kind { Regular, Synthetic, EHFrame, Merge, Output };
@@ -238,6 +240,9 @@ public:
   };
  
 
+
+  // Will be in union with others in higher llvms
+  NanoMipsRelaxAux *nanoMipsRelaxAux = nullptr;
 
   // A function compiled with -fsplit-stack calling a function
   // compiled without -fsplit-stack needs its prologue adjusted. Find

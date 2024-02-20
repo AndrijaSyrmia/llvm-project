@@ -157,7 +157,7 @@ void InputSectionBase::addBytes(uint64_t location, uint32_t count)
   assert(count > 0 && "Number of new bytes must be larger than 0");
   if(count > bytesDropped)
   {
-    // Allocate more data just in case
+    // Allocate more data just in case, maybe reduce this later, as 2 times the data seems a lot for this
     size_t size = (this->size + count - bytesDropped) * 2;
     uint8_t *increasedData;
     {

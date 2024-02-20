@@ -28,7 +28,7 @@
 
 namespace {
   struct SymbolAnchor {
-    // uint64_t offset;
+    uint64_t offset;
     lld::elf::Defined *d;
     bool end;
 
@@ -42,6 +42,11 @@ namespace elf{
   struct NanoMipsRelaxAux {
     uint32_t prevBytesDropped;
     SmallVector<SymbolAnchor, 0> anchors;
+    // For relocations[i], the actual offset is r_offset - (i ? relocInfo.first[i - 1] : 0)
+    // and the actual type is relocInfo.second[i]
+    SmallVector<std::pair<int64_t, RelType>, 0> relocInfo;
+    // What should be written
+    SmallVector<uint64_t, 0> writes;
   };
   
   class NanoMipsRelocProperty;

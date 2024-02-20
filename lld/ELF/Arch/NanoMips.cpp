@@ -443,6 +443,7 @@ bool NanoMips<ELFT>::safeToModify(InputSection *sec) const
   return modifiable;
 }
 
+
 // TODO: Emit reloc option, somewhat different transformations
 template <class ELFT>
 bool NanoMips<ELFT>::relaxOnce(int pass) const
@@ -451,6 +452,10 @@ bool NanoMips<ELFT>::relaxOnce(int pass) const
   LLVM_DEBUG(llvm::dbgs() << "Transformation Pass num: " << pass << "\n";);
   // TODO: Should full nanoMips ISA be checked as full or per obj, as it is checked
   bool changed = false;
+  if(pass == 0)
+  {
+    initTransformAuxInfo();
+  }
   if(this->mayRelax())
   {
     if(pass == 0)
@@ -518,7 +523,7 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
     if(!relocProp) continue;
 
     uint32_t instSize = relocProp->getInstSize();
-    // 48 bit instruction reloc offsets point to 32 bit imm/off not to the beginning of ins~
+    // 48 bit instruction reloc offsets point to 32 bit imm/off not to the beginning of ins
     uint32_t relocOffset = reloc.offset - (instSize == 6 ? 2 : 0);
     uint64_t insn = readInsn<ELFT::TargetEndianness>(sec->content(), relocOffset, instSize);
 
@@ -555,7 +560,7 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
       llvm::dbgs() << "Chosen transform template:\n" << transformTemplate->toString() << "\n";
     );
 
-    // TODO: gold creates a new input section, check if it is needed?
+    // TODO: gold creates a new nanomips input section, check if it is needed?
 
     // Bytes to remove/add
     int32_t delta = transformTemplate->getSizeOfTransform() - instSize;
@@ -592,6 +597,7 @@ void NanoMips<ELFT>::initTransformAuxInfo() const
     {
       if(!this->safeToModify(sec) || sec->relocations.size() == 0) continue;
       sec->nanoMipsRelaxAux = make<NanoMipsRelaxAux>();
+      sec->nanoMipsRelaxAux->relocInfo.reserve(sec->numRelocations);
       sec->nanoMipsRelaxAux->prevBytesDropped = sec->bytesDropped;
       sec->bytesDropped = 0;
     }
@@ -609,10 +615,25 @@ void NanoMips<ELFT>::initTransformAuxInfo() const
           !(sec->type & SHT_PROGBITS) || !sec->nanoMipsRelaxAux || !this->safeToModify(sec) ||
           sec->relocations.size() == 0) continue;
         
-        sec->nanoMipsRelaxAux->anchors.push_back({d, false});
+        sec->nanoMipsRelaxAux->anchors.push_back({d->value, d, false});
         if(d->size > 0)
-          sec->nanoMipsRelaxAux->anchors.push_back({d, true});
+          sec->nanoMipsRelaxAux->anchors.push_back({d->value + d->size, d, true});
       }
+    }
+  }
+
+  for(OutputSection *osec: outputSections)
+  {
+    if((osec->flags & (SHF_EXECINSTR | SHF_ALLOC)) != (SHF_EXECINSTR | SHF_ALLOC) || !(osec->type & SHT_PROGBITS)) continue;
+
+    for(InputSection *sec: getInputSections(osec))
+    {
+      if(!this->safeToModify(sec) || sec->numRelocations == 0) continue;
+
+      llvm::sort(sec->nanoMipsRelaxAux->anchors, [](auto &a, auto &b) {
+        return std::make_pair(a.offset, a.end) < std::make_pair(b.offset, b.end);
+      });
+      llvm::stable_sort(sec->relocations, [](auto &a, auto &b){ return a.offset < b.offset; });
     }
   }
 }
