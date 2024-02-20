@@ -18,6 +18,7 @@
 #include "llvm/Support/Endian.h"
 #include "Arch/NanoMipsProperties.h"
 #include "SyntheticSections.h"
+#include "lld/Common/Memory.h"
 
 using namespace llvm::object;
 using namespace llvm::ELF;
@@ -128,6 +129,7 @@ private:
     // relax + expand
     void transform(InputSection *sec) const;
 
+    void initTransformAuxInfo() const;
     // bool relax(InputSection *sec) const;
     // bool expand(InputSection *sec) const;
 };
@@ -135,8 +137,6 @@ private:
 
 template <class ELFT>
 NanoMips<ELFT>::NanoMips(): currentTransformation(&insPropertyTable) {
-  // assert(!ELFT::Is64Bits() && ELF32LE::TargetEndianness() == llvm::support::endianness::little
-  //         && "32 little endian is the only supported target for nanoMIPS for now");
   copyRel = R_NANOMIPS_COPY;
   noneRel = R_NANOMIPS_NONE;
   defaultMaxPageSize = 65536;
@@ -397,6 +397,26 @@ bool NanoMips<ELFT>::safeToModify(InputSection *sec) const
   return modifiable;
 }
 
+// Copied from RISCV relaxations
+namespace {
+struct SymbolAnchor {
+  uint64_t offset;
+  Defined *d;
+  bool end; // True for the anchor of st_value+st_size (End of symbol)
+
+  SymbolAnchor(uint64_t off, Defined *defined, bool e) : offset(off), d(defined), end(e) {}
+};
+}
+
+struct elf::NanoMipsRelaxAux {
+  SmallVector<SymbolAnchor, 0> anchors;
+  // For relocations[i], the actual offset is r_offset - (i ? relocInfo.first[i - 1] : 0)
+  // and the actual type is relocInfo.second[i]
+  SmallVector<std::pair<int64_t, RelType>, 0> relocInfo;
+  // What should be written
+  SmallVector<uint64_t, 0> writes;
+};
+
 // TODO: Emit reloc option, somewhat different transformations
 template <class ELFT>
 bool NanoMips<ELFT>::relaxOnce(int pass) const
@@ -404,6 +424,10 @@ bool NanoMips<ELFT>::relaxOnce(int pass) const
   LLVM_DEBUG(llvm::dbgs() << "Transformation Pass num: " << pass << "\n";);
   // TODO: Should full nanoMips ISA be checked as full or per obj, as it is checked
   bool changed = false;
+  if(pass == 0)
+  {
+    initTransformAuxInfo();
+  }
   if(this->mayRelax())
   {
     for(OutputSection *osec : outputSections)
@@ -411,12 +435,29 @@ bool NanoMips<ELFT>::relaxOnce(int pass) const
       if((osec->flags & (SHF_EXECINSTR | SHF_ALLOC)) != (SHF_EXECINSTR | SHF_ALLOC) ||
           !(osec->type & SHT_PROGBITS))
           continue;
-      // TODO: There are null input sections, sections in gold, see what's up with that later
       for(InputSection *sec : getInputSections(osec))
       {
-        if(!this->safeToModify(sec)) continue;
+        // if(pass == 0)
+        // {
+        //   llvm::outs() << "Relocs:\n";
+        //   for(Relocation& reloc: sec->relocations)
+        //   {
 
-        if(sec->numRelocations) this->transform(sec);
+        //     llvm::outs() << reloc.offset << ": " << reloc.type << "\n";
+        //   }
+        //   llvm::outs() << "Symbol anchors:\n";
+        //   std::string prefix = "";
+        //   NanoMipsRelaxAux *relaxAux = sec->nanoMipsRelaxAux;
+        //   for(auto &s : relaxAux->anchors)
+        //   {
+        //     if(s.end) prefix = prefix.erase(prefix.length() - 1);
+        //     llvm::outs() << prefix << s.offset << ": " << s.d->getName() << ", end: " << s.end << "\n";
+        //     if(!s.end) prefix += "\t";
+        //   }
+
+        // }
+        if(!this->safeToModify(sec) && sec->numRelocations == 0) continue;
+        this->transform(sec);
 
       }
     }
@@ -436,7 +477,6 @@ bool NanoMips<ELFT>::relaxOnce(int pass) const
 template <class ELFT>
 void NanoMips<ELFT>::transform(InputSection *sec) const 
 {
-
   const uint32_t bits = config->wordsize * 8;
   uint64_t secAddr = sec->getOutputSection()->addr + sec->outSecOff;
   // Need to do it like this bc at transform we may invalidate the iterator
@@ -451,7 +491,7 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
     if(!relocProp) continue;
 
     uint32_t instSize = relocProp->getInstSize();
-    // 48 bit instruction reloc offsets point to 32 bit imm/off not to the beginning of ins~
+    // 48 bit instruction reloc offsets point to 32 bit imm/off not to the beginning of ins
     uint32_t relocOffset = reloc.offset - (instSize == 6 ? 2 : 0);
     uint64_t insn = readInsn<ELFT::TargetEndianness>(sec->data(), reloc.offset, instSize);
 
@@ -486,7 +526,7 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
       llvm::dbgs() << "TransformTemplate: " << transformTemplate->toString() << "\n";
     );
 
-    // TODO: gold creates a new input section, check if it is needed?
+    // TODO: gold creates a new nanomips input section, check if it is needed?
 
     // Bytes to remove/add
     int32_t delta = transformTemplate->getSizeOfTransform() - instSize;
@@ -494,7 +534,6 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
       this->currentTransformation.updateSectionContent(sec, relocOffset + instSize, delta);
 
     // Transform
-
     this->currentTransformation.transform(reloc, transformTemplate, insProperty, sec, insn, relNum);
 
     auto &newInsns = this->currentTransformation.getNewInsns();
@@ -508,6 +547,60 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
   return;
 }
 
+template <class ELFT>
+void NanoMips<ELFT>::initTransformAuxInfo() const
+{
+  // Storage is used in higher llvms
+  SmallVector<InputSection *, 0> storage;
+  for(OutputSection *osec: outputSections)
+  {
+    if((osec->flags & (SHF_EXECINSTR | SHF_ALLOC)) != (SHF_EXECINSTR | SHF_ALLOC) ||
+          !(osec->type & SHT_PROGBITS))
+          continue;
+    
+    for(InputSection *sec : getInputSections(osec))
+    {
+      if(!this->safeToModify(sec) || sec->numRelocations == 0) continue;
+
+      sec->nanoMipsRelaxAux = make<NanoMipsRelaxAux>();
+      sec->nanoMipsRelaxAux->relocInfo.reserve(sec->numRelocations);
+    }
+  }
+
+  for(InputFile *file : objectFiles)
+  {
+    for(Symbol *sym : file->symbols)
+    {
+      auto *d = dyn_cast<Defined>(sym);
+      if(!d || d->file != file) continue;
+
+      if(auto *sec = dyn_cast_or_null<InputSection>(d->section))
+      {
+        if((sec->flags & (SHF_EXECINSTR | SHF_ALLOC)) != (SHF_EXECINSTR | SHF_ALLOC) ||
+          !(sec->type & SHT_PROGBITS) || !sec->nanoMipsRelaxAux || !this->safeToModify(sec) ||
+          sec->numRelocations == 0) continue;
+        
+        sec->nanoMipsRelaxAux->anchors.push_back({d->value, d, false});
+        sec->nanoMipsRelaxAux->anchors.push_back({d->value + d->size, d, true});
+      }
+    }
+  }
+
+  for(OutputSection *osec: outputSections)
+  {
+    if((osec->flags & (SHF_EXECINSTR | SHF_ALLOC)) != (SHF_EXECINSTR | SHF_ALLOC) || !(osec->type & SHT_PROGBITS)) continue;
+
+    for(InputSection *sec: getInputSections(osec))
+    {
+      if(!this->safeToModify(sec) || sec->numRelocations == 0) continue;
+
+      llvm::sort(sec->nanoMipsRelaxAux->anchors, [](auto &a, auto &b) {
+        return std::make_pair(a.offset, a.end) < std::make_pair(b.offset, b.end);
+      });
+      llvm::stable_sort(sec->relocations, [](auto &a, auto &b){ return a.offset < b.offset; });
+    }
+  }
+}
 
 // bool NanoMips::relax(InputSection *sec) const {
 

@@ -37,6 +37,8 @@ extern std::vector<Partition> partitions;
 // input files, some are sections in the produced output file and some exist
 // just as a convenience for implementing special ways of combining some
 // sections.
+
+struct NanoMipsRelaxAux;
 class SectionBase {
 public:
   enum Kind { Regular, EHFrame, Merge, Synthetic, Output };
@@ -232,6 +234,9 @@ public:
   // basic blocks.
   SmallVector<JumpInstrMod, 0> jumpInstrMods;
 
+  // Will be in union with others in higher llvms
+  NanoMipsRelaxAux *nanoMipsRelaxAux = nullptr;
+
   // A function compiled with -fsplit-stack calling a function
   // compiled without -fsplit-stack needs its prologue adjusted. Find
   // such functions and adjust their prologues.  This is very similar
@@ -401,10 +406,12 @@ private:
   template <class ELFT> void copyShtGroup(uint8_t *buf);
 };
 
+// TODO: Return for WIN32 to 192 and for else 184, this is changed
+// so I can put nanoMipsRelaxAux
 #ifdef _WIN32
-static_assert(sizeof(InputSection) <= 192, "InputSection is too big");
+static_assert(sizeof(InputSection) <= 196, "InputSection is too big");
 #else
-static_assert(sizeof(InputSection) <= 184, "InputSection is too big");
+static_assert(sizeof(InputSection) <= 192, "InputSection is too big");
 #endif
 
 inline bool isDebugSection(const InputSectionBase &sec) {

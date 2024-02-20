@@ -524,6 +524,8 @@ void NanoMipsTransform::transform(Relocation &reloc, const NanoMipsTransformTemp
         newRelocation.expr = target->getRelExpr(newRelType, *reloc.sym, isec->data().data() + newROffset);
         newRelocation.sym = reloc.sym;
         newRelocation.type = newRelType;
+        // TODO: This will have to be changed, as we are messing with relocation numbers,
+        // needed for balc trampolines
         isec->relocations.insert(isec->relocations.begin() + relNum, newRelocation);
         relNum++;
         LLVM_DEBUG(llvm::dbgs() << "Added new reloc " << reloc.type << "\n";);
