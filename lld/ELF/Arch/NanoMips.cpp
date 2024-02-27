@@ -80,6 +80,8 @@ static uint64_t readInsn(ArrayRef<uint8_t> data, uint64_t off, uint32_t insnSize
   if(insnSize == 6) return read16(&data[off]);
   else if(insnSize == 4) return readShuffle32<E>(&data[off]);
   else if(insnSize == 2) return read16(&data[off]);
+  // Case when R_NANOMIPS_NONE is returned
+  // else if(insnSize == 0) return 0;
   else llvm_unreachable("Unknown byte size of nanoMIPS instruction (only 2, 4 and 6 known)");
 }
 
@@ -93,6 +95,16 @@ static void writeInsn(uint64_t insn, ArrayRef<uint8_t>data, uint64_t off, uint32
     else if(insnSize == 2) write16(dataPtr + off, (uint16_t)insn);
     else llvm_unreachable("Unknown byte size of nanoMIPS instruction (only 2, 4, and 6 known)");
 }
+
+template <endianness E>
+static void writeInsn(uint64_t insn, uint8_t *pos, uint32_t insnSize)
+{
+  if (insnSize == 6) write16(pos, (uint16_t)insn);
+  else if(insnSize == 4) writeShuffle32<E>(pos,((uint32_t)insn));
+  else if(insnSize == 2) write16(pos, (uint16_t)insn);
+  else llvm_unreachable("Unknown byte size of nanoMIPS instruction (only 2, 4, and 6 known)");
+}
+
 
 uint64_t elf::getNanoMipsPage(uint64_t expr) {
   return expr & ~static_cast<uint64_t>(0xFFF);
@@ -137,6 +149,9 @@ private:
     void initTransformAuxInfo() const;
     void align(InputSection *sec, Relocation &reloc, uint32_t relNum) const;
     void finalizeRelaxations() const override;
+    // sa is changed with every relocation that transforms
+    void updateTransformAuxInfo(InputSection *isec, Relocation &rel, ArrayRef<SymbolAnchor> &sa, int64_t delta) const;
+    void finalizeSecTransformation(InputSection *isec, int64_t totalDelta) const;
     // bool relax(InputSection *sec) const;
     // bool expand(InputSection *sec) const;
 };
@@ -452,10 +467,6 @@ bool NanoMips<ELFT>::relaxOnce(int pass) const
   LLVM_DEBUG(llvm::dbgs() << "Transformation Pass num: " << pass << "\n";);
   // TODO: Should full nanoMips ISA be checked as full or per obj, as it is checked
   bool changed = false;
-  if(pass == 0)
-  {
-    initTransformAuxInfo();
-  }
   if(this->mayRelax())
   {
     if(pass == 0)
@@ -476,7 +487,6 @@ bool NanoMips<ELFT>::relaxOnce(int pass) const
 
       }
     }
-
     changed = this->currentTransformation.shouldRunAgain();
     const_cast<NanoMipsTransformController &>(this->currentTransformation).changeState(pass);
     // if(!changed && config->expand && this->currentTransformState->getType() == NanoMipsTransform::TransformRelax)
@@ -502,6 +512,14 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
   contextProperties.pcrel = obj ? isNanoMipsPcRel<ELFT>(obj) : false;
   const uint32_t bits = config->wordsize * 8;
   uint64_t secAddr = sec->getOutputSection()->addr + sec->outSecOff;
+
+
+  NanoMipsRelaxAux &aux = *sec->nanoMipsRelaxAux;
+  int64_t totalDelta = 0; 
+  uint32_t symCnt = 0;
+  // std::fill_n(aux.relocInfo.data(), sec->relocations.size(), std::pair<int64_t, RelType>(0, R_NANOMIPS_NONE));
+  aux.relocInfo.assign(sec->relocations.size(), std::pair<int64_t, RelType>(0, R_NANOMIPS_NONE));
+  aux.writes.clear();
   // Need to do it like this bc at transform we may invalidate the iterator
   // TODO: Relocs are not sorted by offset, check if they should be?
   // TODO: Comdat behaviour?
@@ -516,8 +534,11 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
       this->align(sec, reloc, relNum);
       continue;
     }
+    if(reloc.type == R_NANOMIPS_NONE) continue;
+    int64_t &curRelDelta = aux.relocInfo[relNum].first;
     // TODO: Check if section should be compressed when returning value
-    uint64_t addrLoc = secAddr + reloc.offset;
+    // TODO: Check out if we can put totalDelta here, as the addresses will change by that much in section
+    uint64_t addrLoc = secAddr + reloc.offset - totalDelta;
     uint64_t valueToRelocate = llvm::SignExtend64(sec->getRelocTargetVA(sec->file, reloc.type, reloc.addend, addrLoc, *reloc.sym, reloc.expr), bits);
     const NanoMipsRelocProperty *relocProp =  relocPropertyTable.getRelocProperty(reloc.type);
     if(!relocProp) continue;
@@ -554,7 +575,6 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
     if(reloc.sym && reloc.sym->isUndefWeak())
       continue;
     const NanoMipsTransformTemplate *transformTemplate = this->currentTransformation.getTransformTemplate(insProperty, reloc, valueToRelocate, insn, sec);
-
     if(!transformTemplate) continue;
     LLVM_DEBUG( 
       llvm::dbgs() << "Chosen transform template:\n" << transformTemplate->toString() << "\n";
@@ -563,23 +583,64 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
     // TODO: gold creates a new nanomips input section, check if it is needed?
 
     // Bytes to remove/add
-    int32_t delta = transformTemplate->getSizeOfTransform() - instSize;
-    if(delta != 0)
-      this->currentTransformation.updateSectionContent(sec, relocOffset + instSize, delta);
+    int32_t delta =  instSize - transformTemplate->getSizeOfTransform();
+
+    for(;aux.anchors.size() > symCnt && aux.anchors[symCnt].offset <= relocOffset; symCnt++)
+    {
+      if(aux.anchors[symCnt].end) aux.anchors[symCnt].d->size = aux.anchors[symCnt].offset - totalDelta + aux.anchors[symCnt].d->value;
+      else {
+        aux.anchors[symCnt].d->value = aux.anchors[symCnt].offset - totalDelta;
+        aux.anchors[symCnt].offset = aux.anchors[symCnt].d->value;
+      }
+    }
+    // for(; sa.size() && sa[0].offset <= relocOffset; sa = sa.slice(1))
+    // {
+    //   if(sa[0].end) sa[0].d->size = sa[0].offset - totalDelta + sa[0].d->value;
+    //   else { 
+    //     sa[0].d->value = sa[0].offset - totalDelta;
+    //     sa[0].offset = sa[0].d->value;
+    //   }
+    // }
+    totalDelta += delta;
+    if(totalDelta != curRelDelta)
+      curRelDelta = totalDelta;
+
+
+
+    // if(delta != 0)
+      // this->currentTransformation.updateSectionContent(sec, relocOffset + instSize, delta);
 
     // Transform
     // Note: Reloc may be invalidated, but we don't need it from this point on
     // To restore it use its relNum, not the one after transform as it changes
-    this->currentTransformation.transform(&reloc, transformTemplate, insProperty, relocProp, sec, insn, relNum);
+    // Note: symCnt can also be changed in transform
+    // TODO: Fix the delta
+    this->currentTransformation.transform(&reloc, transformTemplate, insProperty, relocProp, sec, insn, relNum, symCnt, totalDelta - delta);
 
-    auto &newInsns = this->currentTransformation.getNewInsns();
-    for(auto &newInsn : newInsns)
-    {
-      writeInsn<ELFT::TargetEndianness>(newInsn.insn, sec->content(), newInsn.offset, newInsn.size);
-    }
-    newInsns.clear();
+    // auto &newInsns = this->currentTransformation.getNewInsns();
+    // for(auto &newInsn : newInsns)
+    // {
+    //   writeInsn<ELFT::TargetEndianness>(newInsn.insn, sec->data(), newInsn.offset, newInsn.size);
+    // }
+    // newInsns.clear();
     // Finalize content?
   }
+  if(totalDelta != 0)
+  {
+    for(;aux.anchors.size() > symCnt; symCnt++)
+    {
+      if(aux.anchors[symCnt].end) aux.anchors[symCnt].d->size = aux.anchors[symCnt].offset - totalDelta + aux.anchors[symCnt].d->value;
+      else {
+        aux.anchors[symCnt].d->value = aux.anchors[symCnt].offset - totalDelta;
+        aux.anchors[symCnt].offset = aux.anchors[symCnt].d->value;
+      }
+    }
+    const_cast<NanoMipsTransformController &>(this->currentTransformation).setChanged();
+    // TODO: Check if there are some relaxations/expansions that preserve byte count
+    finalizeSecTransformation(sec, totalDelta);
+  }
+
+
   return;
 }
 
@@ -597,7 +658,7 @@ void NanoMips<ELFT>::initTransformAuxInfo() const
     {
       if(!this->safeToModify(sec) || sec->relocations.size() == 0) continue;
       sec->nanoMipsRelaxAux = make<NanoMipsRelaxAux>();
-      sec->nanoMipsRelaxAux->relocInfo.reserve(sec->numRelocations);
+      sec->nanoMipsRelaxAux->relocInfo.reserve(sec->relocations.size());
       sec->nanoMipsRelaxAux->prevBytesDropped = sec->bytesDropped;
       sec->bytesDropped = 0;
     }
@@ -626,9 +687,9 @@ void NanoMips<ELFT>::initTransformAuxInfo() const
   {
     if((osec->flags & (SHF_EXECINSTR | SHF_ALLOC)) != (SHF_EXECINSTR | SHF_ALLOC) || !(osec->type & SHT_PROGBITS)) continue;
 
-    for(InputSection *sec: getInputSections(osec))
+    for(InputSection *sec: getInputSections(*osec, storage))
     {
-      if(!this->safeToModify(sec) || sec->numRelocations == 0) continue;
+      if(!this->safeToModify(sec) || sec->relocations.size() == 0) continue;
 
       llvm::sort(sec->nanoMipsRelaxAux->anchors, [](auto &a, auto &b) {
         return std::make_pair(a.offset, a.end) < std::make_pair(b.offset, b.end);
@@ -755,7 +816,91 @@ void NanoMips<ELFT>::finalizeRelaxations() const {
   }
 }
 
+template <class ELFT>
+void NanoMips<ELFT>::finalizeSecTransformation(InputSection *isec, int64_t totalDelta) const {
 
+  NanoMipsRelaxAux &aux = *isec->nanoMipsRelaxAux;
+  // No need to do anything if we have nothing to change
+  assert(aux.writes.size() != 0);
+  ArrayRef<uint8_t> oldData = isec->content();
+  size_t newSize = oldData.size() - isec->bytesDropped - totalDelta;
+  size_t writesIdx = 0;
+  // TODO: Check later if the linker eats up a lot of memory
+  // it is probably because of this, make a better way to do
+  // this (relaxations can be definitely done without new section containers)
+  uint8_t *p = context().bAlloc.Allocate<uint8_t>(newSize);
+  isec->content_ = p;
+  isec->size = newSize;
+  // TODO: Find out if bytesDropped are useful for nanoMIPS
+  isec->bytesDropped = 0;
+  // How much delta did we pass already
+  int64_t delta = 0;
+  // Where we got in the section
+  uint64_t offset = 0;
+  for(size_t i = 0, e = isec->relocations.size(); i < e; i++)
+  {
+    // TODO: Check this if statement
+    if(aux.relocInfo[i].first == 0) continue;
+    int64_t curDelta = aux.relocInfo[i].first - delta;
+    delta = aux.relocInfo[i].first;
+
+    const Relocation &rel = isec->relocations[i];
+    const NanoMipsRelocProperty *relocProp = relocPropertyTable.getRelocProperty(rel.type);
+    uint32_t relOffset = rel.offset - (relocProp->getInstSize() == 6 ? 2 : 0);
+    uint64_t size = relOffset - offset;
+    memcpy(p, oldData.data() + offset, size);
+    p += size;
+
+    do {
+      uint64_t write = aux.writes[writesIdx].first;
+      uint32_t writeSize = aux.writes[writesIdx].second & (-1UL << 1);
+      writeInsn<ELFT::TargetEndianness>(write, p, writeSize);
+      p += writeSize;
+    } while(aux.writes[writesIdx++].second & 1);
+
+    offset = relOffset + relocProp->getInstSize();
+  }
+  memcpy(p, oldData.data() + offset, oldData.size() - offset);
+
+  // adjust relocs
+  delta = 0;
+  int64_t prevDelta = 0;
+  writesIdx = 0;
+  for(size_t i = 0, e = isec->relocations.size(); i < e; i++)
+  {
+    if(i != 0 && aux.relocInfo[i - 1].first)
+    {
+      prevDelta = delta;
+      delta = aux.relocInfo[i - 1].first;
+    }
+    // uint64_t cur = isec->relocations[i].offset;
+    // do {
+    if(aux.relocInfo[i].first != 0)
+    {
+      isec->relocations[i].offset -= delta;
+      writesIdx++;
+      const NanoMipsRelocProperty *relocProperty = relocPropertyTable.getRelocProperty(isec->relocations[i].type);
+      const NanoMipsRelocProperty *relocPropertyTransform = relocPropertyTable.getRelocProperty(aux.relocInfo[i].second);
+      isec->relocations[i].type = aux.relocInfo[i].second;
+      // for 6-byte instruction reloc offset points to the last 4 bytes not to beginning of ins
+      if(relocProperty->getInstSize() == 6 && relocPropertyTransform->getInstSize() != 6)
+        isec->relocations[i].offset -= 2;
+      else if(relocProperty->getInstSize() != 6 && relocPropertyTransform->getInstSize() == 6)
+        isec->relocations[i].offset += 2;
+    }
+    // This means that the instruction was separated to more than one reloc
+    else if(writesIdx != 0 && (aux.writes[writesIdx - 1].second & 1))
+    {
+      isec->relocations[i].offset -= prevDelta;
+      writesIdx++;
+    }
+    else {
+      isec->relocations[i].offset -= delta;
+    }
+    // } while (++i != e && isec->relocations[i].offset == cur);
+
+  }
+}
 
 template TargetInfo *elf::getNanoMipsTargetInfo<ELF32LE>();
 template TargetInfo *elf::getNanoMipsTargetInfo<ELF32BE>();

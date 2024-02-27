@@ -493,10 +493,12 @@ void NanoMipsTransform::updateSectionContent(InputSection *isec, uint64_t locati
   }
 }
 
-void NanoMipsTransform::transform(Relocation *reloc, const NanoMipsTransformTemplate *transformTemplate, const NanoMipsInsProperty *insProperty, const NanoMipsRelocProperty *relocProperty, InputSection *isec, uint64_t insn, uint32_t &relNum) const
+void NanoMipsTransform::transform(Relocation *reloc, const NanoMipsTransformTemplate *transformTemplate, const NanoMipsInsProperty *insProperty, const NanoMipsRelocProperty *relocProperty, InputSection *isec, uint64_t insn, uint32_t &relNum, uint32_t &symCnt, int64_t symDelta) const
 {
   uint32_t tReg = 0;
   uint32_t sReg = 0;
+  auto &writes = isec->nanoMipsRelaxAux->writes;
+  auto &relocInfo = isec->nanoMipsRelaxAux->relocInfo;
   switch(reloc->type)
   {
     case R_NANOMIPS_PC14_S1:
@@ -607,40 +609,54 @@ void NanoMipsTransform::transform(Relocation *reloc, const NanoMipsTransformTemp
     uint64_t newInsn = insTemplate.getInstruction(tReg, sReg);
     RelType newRelType = insTemplate.getReloc();
 
-    if(newRelType != R_NANOMIPS_NONE)
-    {
-      assert(transformTemplate->getType() != TT_NANOMIPS_DISCARD && "There is a reloc for a DISCARD relaxation!");
+    // TODO: See what you are going to do about R_NANOMIPS_NONE
+    assert((transformTemplate->getType() != TT_NANOMIPS_DISCARD || newRelType == R_NANOMIPS_NONE) && "There is a reloc for a DISCARD relaxation!");
 
-      uint32_t newROffset = (insTemplate.getSize() == 6 ? offset + 2 : offset);
-      if(!newReloc)
-      {
-        reloc->offset = newROffset;
-        reloc->type = newRelType;
-        // Only param needed is relType, other ones are not important for nanoMIPS
-        reloc->expr = target->getRelExpr(newRelType, *reloc->sym, isec->content().data() + newROffset);
-        newReloc = true;
-        LLVM_DEBUG(llvm::dbgs() << "Changed current reloc to " << reloc->type << "\n";);
-      }
-      else
-      {
-        Relocation newRelocation;
-        newRelocation.addend = reloc->addend;
-        newRelocation.offset = newROffset;
-        // Only param needed is relType, other ones are not important for nanoMIPS
-        newRelocation.expr = target->getRelExpr(newRelType, *reloc->sym, isec->content().data() + newROffset);
-        newRelocation.sym = reloc->sym;
-        newRelocation.type = newRelType;
-        relNum++;
-        isec->relocations.insert(isec->relocations.begin() + relNum, newRelocation);
-        // Because we add a relocation, it might invalidate our previous reloc!
-        reloc = &isec->relocations[relNum - 1];
-        LLVM_DEBUG(llvm::dbgs() << "Added new reloc " << newRelType << "\n";);
-        // TODO: Setting reloc strategy for finalizing relocs
-      }
+    uint32_t newROffset = (insTemplate.getSize() == 6 ? offset + 2 : offset);
+    if(!newReloc)
+    {
+      // reloc->offset = newROffset;
+      // reloc->type = newRelType;
+      // Only param needed is relType, other ones are not important for nanoMIPS
+      reloc->expr = target->getRelExpr(newRelType, *reloc->sym, isec->content().data() + newROffset);
+      // TODO: Another way of doing this, R_NONE causes getRelocTargetVA to get to unreachable
+      if (reloc->expr == R_NONE)
+        reloc->expr = R_RELAX_HINT;
+      relocInfo[relNum].second = newRelType;
+      newReloc = true;
+      LLVM_DEBUG(llvm::dbgs() << "Changed current reloc to " << newRelType << "\n";);
+    }
+    else
+    {
+      Relocation newRelocation;
+      newRelocation.addend = reloc->addend;
+      newRelocation.offset = newROffset;
+      // Only param needed is relType, other ones are not important for nanoMIPS
+      newRelocation.expr = target->getRelExpr(newRelType, *reloc->sym, isec->content().data() + newROffset);
+      // TODO: Another way of doing this, R_NONE causes getRelocTargetVA to get to unreachable
+      if (newRelocation.expr == R_NONE)
+        newRelocation.expr = R_RELAX_HINT;
+      newRelocation.sym = reloc->sym;
+      newRelocation.type = newRelType;
+      relNum++;
+      isec->relocations.insert(isec->relocations.begin() + relNum, newRelocation);
+      // Adding this to relocInfo as well
+      // TODO: See if this can be processed in finalize not here, but here is fine
+      // as well as we have to generate a new reloc
+      relocInfo.insert(relocInfo.begin() + relNum, {0, R_NANOMIPS_NONE});
+      // Because there is more insns replacing previous ins
+      // we want to rewrite the
+      // last write that was here to point there is more instructions
+      // for this relocation
+      writes.back().second |= 1;
+      // Because we add a relocation, it might invalidate our previous reloc!
+      reloc = &isec->relocations[relNum - 1];
+      LLVM_DEBUG(llvm::dbgs() << "Added new reloc " << newRelType << "\n";);
+      // TODO: Setting reloc strategy for finalizing relocs
     }
 
-
-    newInsns.emplace_back(newInsn, offset, insTemplate.getSize());
+    writes.emplace_back(newInsn, insTemplate.getSize());
+    // newInsns.emplace_back(newInsn, offset, insTemplate.getSize());
     LLVM_DEBUG(llvm::dbgs() << "New instruction " << insTemplate.getName() << ": 0x" << utohexstr(newInsn) << " to offset: 0x" << utohexstr(offset) << "\n");
     offset += insTemplate.getSize();
   }
@@ -655,10 +671,12 @@ void NanoMipsTransform::transform(Relocation *reloc, const NanoMipsTransformTemp
     // TODO: Do not make new strings like this
     std::string &name = *make<std::string>(SS.str());
     StringRef nameRef = name;
-    Defined *s = dyn_cast<Defined>(symtab.addSymbol(Defined{isec->file, nameRef, STB_GLOBAL, STV_HIDDEN, STT_NOTYPE, offset, 0, isec}));
+    // TODO: Check the static cast for offset
+    Defined *s = dyn_cast<Defined>(symtab.addSymbol(Defined{isec->file, nameRef, STB_GLOBAL, STV_HIDDEN, STT_NOTYPE, static_cast<uint64_t>(offset - symDelta), 0, isec}));
     assert(s && "Didn't create needed symbol for relaxations/expansions!");
     reloc->sym = s;
-    isec->nanoMipsRelaxAux->anchors.push_back({s, false});
+    isec->nanoMipsRelaxAux->anchors.insert(isec->nanoMipsRelaxAux->anchors.begin() + symCnt, {s->value, s, false});
+    symCnt++;
     in.symTab->addSymbol(s);
     LLVM_DEBUG(llvm::dbgs() << "New symbol " << s->getName() << " in section " << (isec->file ? isec->file->getName() : "no file") << ":" << isec->name << " on offset " << offset << "\n";);
   }

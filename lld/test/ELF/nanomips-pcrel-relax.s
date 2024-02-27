@@ -54,13 +54,23 @@
 # CHECK-NMF-PCREL: a8e0{{.*}} bnezc {{.*}} <x2>
 # CHECK-NMF-PCREL: 88e6{{.*}} beqc {{.*}} <x1>
 
-# CHECK-NMF-PCREL: dae{{.*}} bnec {{.*}} <__skip_bc__{{[0-9]*}}>
+# CHECK-NMF-PCREL: dae{{.*}} bnec {{.*}} <__skip_bc__[[BC_NUM:[0-9]*]]>
 # CHECK-NMF-PCREL-NEXT: 28{{.*}} bc {{.*}} <pc14_far>
-# CHECK-NMF-PCREL: db5{{.*}} beqc {{.*}} <__skip_bc__{{[0-9]*}}>
-# CHECK-NMF-PCREL: a8c5{{.*}} bltc {{.*}} <__skip_bc__{{[0-9]*}}>
-# CHECK-NMF-PCREL: 88c5{{.*}} bgec {{.*}} <__skip_bc__{{[0-9]*}}>
-# CHECK-NMF-PCREL: a8c5{{.*}} bltuc {{.*}} <__skip_bc__{{[0-9]*}}>
-# CHECK-NMF-PCREL: 88c5{{.*}} bgeuc {{.*}} <__skip_bc__{{[0-9]*}}>
+# CHECK-NMF-PCREL: <__skip_bc__[[BC_NUM]]>
+# CHECK-NMF-PCREL-NEXT: db5{{.*}} beqc {{.*}} <__skip_bc__[[BC_NUM:[0-9]*]]>
+# CHECK-NMF-PCREL-NEXT: 28{{.*}} bc {{.*}} <pc14_far>
+# CHECK-NMF-PCREL: <__skip_bc__[[BC_NUM]]>
+# CHECK-NMF-PCREL-NEXT: a8c5{{.*}} bltc {{.*}} <__skip_bc__[[BC_NUM:[0-9]*]]>
+# CHECK-NMF-PCREL-NEXT: 28{{.*}} bc {{.*}} <pc14_far>
+# CHECK-NMF-PCREL: <__skip_bc__[[BC_NUM]]>
+# CHECK-NMF-PCREL-NEXT: 88c5{{.*}} bgec {{.*}} <__skip_bc__[[BC_NUM:[0-9]*]]>
+# CHECK-NMF-PCREL-NEXT: 28{{.*}} bc {{.*}} <pc14_far>
+# CHECK-NMF-PCREL: <__skip_bc__[[BC_NUM]]>
+# CHECK-NMF-PCREL-NEXT: a8c5{{.*}} bltuc {{.*}} <__skip_bc__[[BC_NUM:[0-9]*]]>
+# CHECK-NMF-PCREL-NEXT: 28{{.*}} bc {{.*}} <pc14_far>
+# CHECK-NMF-PCREL: <__skip_bc__[[BC_NUM]]>
+# CHECK-NMF-PCREL-NEXT: 88c5{{.*}} bgeuc {{.*}} <__skip_bc__[[BC_NUM:[0-9]*]]>
+# CHECK-NMF-PCREL-NEXT: 28{{.*}} bc {{.*}} <pc14_far>
 
 # CHECK-NMF-PCREL: 2a{{.*}} balc {{.*}} <pc10_far
 # CHECK-NMF-PCREL-NEXT: 28{{.*}} bc {{.*}} <pc10_far_a>
@@ -78,15 +88,29 @@
 # CHECK-NMF-PCREL: d830 jalrc at
 # CHECK-NMF-PCREL-NEXT: 29{{.*}} bc {{.*}}<pc25_far>
 
-# CHECK-NMF-PCREL: c8{{.*}} bbnezc {{.*}} <__skip_bc__{{[0-9]*}}>
+# CHECK-NMF-PCREL: c8{{.*}} bbnezc {{.*}} <__skip_bc__[[BC_NUM:[0-9]*]]>
 # CHECK-NMF-PCREL-NEXT: 28{{.*}} bc {{.*}} <pc11_far>
-# CHECK-NMF-PCREL: c8{{.*}} bbeqzc {{.*}} <__skip_bc__{{[0-9]*}}>
-# CHECK-NMF-PCREL: c8{{.*}} bneic {{.*}} <__skip_bc__{{[0-9]*}}>
-# CHECK-NMF-PCREL: c8{{.*}} beqic {{.*}} <__skip_bc__{{[0-9]*}}>
-# CHECK-NMF-PCREL: c8{{.*}} bltic {{.*}} <__skip_bc__{{[0-9]*}}>
-# CHECK-NMF-PCREL: c8{{.*}} bgeic {{.*}} <__skip_bc__{{[0-9]*}}>
-# CHECK-NMF-PCREL: c8{{.*}} bltiuc {{.*}} <__skip_bc__{{[0-9]*}}>
-# CHECK-NMF-PCREL: c8{{.*}} bgeiuc {{.*}} <__skip_bc__{{[0-9]*}}>
+# CHECK-NMF-PCREL: <__skip_bc__[[BC_NUM]]>
+# CHECK-NMF-PCREL-NEXT: c8{{.*}} bbeqzc {{.*}} <__skip_bc__[[BC_NUM:[0-9]*]]>
+# CHECK-NMF-PCREL-NEXT: 28{{.*}} bc {{.*}} <pc11_far>
+# CHECK-NMF-PCREL: <__skip_bc__[[BC_NUM]]>
+# CHECK-NMF-PCREL-NEXT: c8{{.*}} bneic {{.*}} <__skip_bc__[[BC_NUM:[0-9]*]]>
+# CHECK-NMF-PCREL-NEXT: 28{{.*}} bc {{.*}} <pc11_far>
+# CHECK-NMF-PCREL: <__skip_bc__[[BC_NUM]]>
+# CHECK-NMF-PCREL-NEXT: c8{{.*}} beqic {{.*}} <__skip_bc__[[BC_NUM:[0-9]*]]>
+# CHECK-NMF-PCREL-NEXT: 28{{.*}} bc {{.*}} <pc11_far>
+# CHECK-NMF-PCREL: <__skip_bc__[[BC_NUM]]>
+# CHECK-NMF-PCREL-NEXT: c8{{.*}} bltic {{.*}} <__skip_bc__[[BC_NUM:[0-9]*]]>
+# CHECK-NMF-PCREL-NEXT: 28{{.*}} bc {{.*}} <pc11_far>
+# CHECK-NMF-PCREL: <__skip_bc__[[BC_NUM]]>
+# CHECK-NMF-PCREL-NEXT: c8{{.*}} bgeic {{.*}} <__skip_bc__[[BC_NUM:[0-9]*]]>
+# CHECK-NMF-PCREL-NEXT: 28{{.*}} bc {{.*}} <pc11_far>
+# CHECK-NMF-PCREL: <__skip_bc__[[BC_NUM]]>
+# CHECK-NMF-PCREL-NEXT: c8{{.*}} bltiuc {{.*}} <__skip_bc__[[BC_NUM:[0-9]*]]>
+# CHECK-NMF-PCREL-NEXT: 28{{.*}} bc {{.*}} <pc11_far>
+# CHECK-NMF-PCREL: <__skip_bc__[[BC_NUM]]>
+# CHECK-NMF-PCREL-NEXT: c8{{.*}} bgeiuc {{.*}} <__skip_bc__[[BC_NUM:[0-9]*]]>
+# CHECK-NMF-PCREL-NEXT: 28{{.*}} bc {{.*}} <pc11_far>
 
 # Will only check differences from others from now on
 
@@ -291,7 +315,7 @@ pc10_far_a:
 expand_pc7:
     beqzc $a1, pc7_far_a-4
     bnezc $a1, pc7_far_a
-    # pc7_far is not far for next two
+    # pc7_far is not far for next two, but the next one may not be relaxed depending on the chosen algorithm
     # if lapc expands to 6byte lapc
     beqzc $a1, pc7_far_a
     bnezc $a1, pc7_far_a

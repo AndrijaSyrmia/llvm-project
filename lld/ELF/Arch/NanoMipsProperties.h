@@ -14,6 +14,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "InputFiles.h"
+#include "Symbols.h"
 
 #undef TRANSFORM_ENUM
 #define TRANSFORM_ENUM
@@ -26,14 +27,15 @@
 // using namespace lld;
 // Used for relaxation purposes
 
+// Copied from RISCV relaxations
 namespace {
-  struct SymbolAnchor {
-    uint64_t offset;
-    lld::elf::Defined *d;
-    bool end;
+struct SymbolAnchor {
+  uint64_t offset;
+  lld::elf::Defined *d;
+  bool end; // True for the anchor of st_value+st_size (End of symbol)
 
-    SymbolAnchor(lld::elf::Defined *defined, bool e): d(defined), end(e) {}
-  };
+  SymbolAnchor(uint64_t off, lld::elf::Defined *defined, bool e) : offset(off), d(defined), end(e) {}
+};
 }
 
 namespace lld {
@@ -46,7 +48,11 @@ namespace elf{
     // and the actual type is relocInfo.second[i]
     SmallVector<std::pair<int64_t, RelType>, 0> relocInfo;
     // What should be written
-    SmallVector<uint64_t, 0> writes;
+    // uint64_t is the instruction (maybe it can be implemented as 48bits to save space,
+    // or the top of uint64_t can be used), uint32_t is used to determine the size of inst
+    // and whether this relocation has more than one instruction to write (which happens during expansions)
+    // the sizes are 0, 2, 4, or 6 bytes and the last bit is used to determine is there more instructions
+    SmallVector<std::pair<uint64_t, uint32_t>, 0> writes;
   };
   
   class NanoMipsRelocProperty;
@@ -295,12 +301,13 @@ namespace elf{
       virtual const NanoMipsInsProperty *getInsProperty(uint64_t insn, uint64_t insnMask, RelType reloc, InputSectionBase *isec) const = 0;
       virtual const NanoMipsTransformTemplate *getTransformTemplate(const NanoMipsInsProperty *insProperty, const Relocation &reloc, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const = 0;
       virtual void updateSectionContent(InputSection *isec, uint64_t location, int32_t delta, bool align = false);
+      void setChanged() { changed = true; changedThisIteration = true; }
       bool getChanged() { return changed; }
       bool getChangedThisIteration() { return changedThisIteration; }
       void resetChanged() { changed = false; }
       void resetChangedThisIteration() { changedThisIteration = false; }
       // Relnum is changed in transform as it is passed by reference
-      virtual void transform(Relocation *reloc, const NanoMipsTransformTemplate *transformTemplate, const NanoMipsInsProperty *insProperty, const NanoMipsRelocProperty *relocProperty, InputSection *isec, uint64_t insn, uint32_t &relNum) const;
+      virtual void transform(Relocation *reloc, const NanoMipsTransformTemplate *transformTemplate, const NanoMipsInsProperty *insProperty, const NanoMipsRelocProperty *relocProperty, InputSection *isec, uint64_t insn, uint32_t &relNum, uint32_t &symCnt, int64_t symDelta) const;
       // const NanoMipsInsProperty *
       // Debugging purposes only
       std::string getTypeAsString() const;
@@ -366,6 +373,7 @@ namespace elf{
 
       NanoMipsContextProperties& getContextProperties() const { return this->currentState->contextProperties; }
 
+      void setChanged() { this->currentState->setChanged(); }
       NanoMipsTransform::TransformKind getType() const { return this->currentState->getType(); }
       // should be called before change state
       bool shouldRunAgain() const { return this->currentState->getChanged(); }
@@ -375,8 +383,8 @@ namespace elf{
       { return this->currentState->getTransformTemplate(insProperty, reloc, valueToRelocate, insn, isec);}
 
       void updateSectionContent(InputSection *isec, uint64_t location, int32_t delta, bool align = false) const { this->currentState->updateSectionContent(isec, location, delta, align);}
-      void transform(Relocation *reloc, const NanoMipsTransformTemplate *transformTemplate, const NanoMipsInsProperty *insProperty, const NanoMipsRelocProperty *relocProperty, InputSection *isec, uint64_t insn, uint32_t &relNum) const
-      { this->currentState->transform(reloc, transformTemplate, insProperty, relocProperty, isec, insn, relNum); }
+      void transform(Relocation *reloc, const NanoMipsTransformTemplate *transformTemplate, const NanoMipsInsProperty *insProperty, const NanoMipsRelocProperty *relocProperty, InputSection *isec, uint64_t insn, uint32_t &relNum, uint32_t &symCnt, int64_t symDelta) const
+      { this->currentState->transform(reloc, transformTemplate, insProperty, relocProperty, isec, insn, relNum, symCnt, symDelta); }
 
       auto &getNewInsns() const { return this->currentState->getNewInsns(); }
 
