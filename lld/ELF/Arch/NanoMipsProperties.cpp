@@ -443,7 +443,8 @@ void NanoMipsTransform::transform(Relocation &reloc, const NanoMipsTransformTemp
 {
   uint32_t tReg = 0;
   uint32_t sReg = 0;
-
+  auto &writes = isec->nanoMipsRelaxAux->writes;
+  auto &relocInfo = isec->nanoMipsRelaxAux->relocInfo;
   switch(reloc.type)
   {
     case R_NANOMIPS_PC14_S1:
@@ -496,45 +497,55 @@ void NanoMipsTransform::transform(Relocation &reloc, const NanoMipsTransformTemp
   // Whether we are inserting a new reloc, or just changing the existing one
   bool newReloc = false;
   auto instructionList = makeArrayRef(transformTemplate->getInsns(), transformTemplate->getInsCount());
+  // TODO: TT_DISCARD
   for(auto &insTemplate : instructionList)
   {
     uint64_t newInsn = insTemplate.getInstruction(tReg, sReg);
     RelType newRelType = insTemplate.getReloc();
 
-    if(newRelType != R_NANOMIPS_NONE)
-    {
-      assert(transformTemplate->getType() != TT_NANOMIPS_DISCARD && "There is a reloc for a DISCARD relaxation!");
+    // TODO: See what you are going to do about R_NANOMIPS_NONE
+    assert((transformTemplate->getType() != TT_NANOMIPS_DISCARD || newRelType == R_NANOMIPS_NONE) && "There is a reloc for a DISCARD relaxation!");
 
-      uint32_t newROffset = (insTemplate.getSize() == 6 ? offset + 2 : offset);
-      if(!newReloc)
-      {
-        reloc.offset = newROffset;
-        reloc.type = newRelType;
-        // Only param needed is relType, other ones are not important for nanoMIPS
-        reloc.expr = target->getRelExpr(newRelType, *reloc.sym, isec->data().data() + newROffset);
-        newReloc = true;
-        LLVM_DEBUG(llvm::dbgs() << "Changed current reloc to " << reloc.type << "\n";);
-      }
-      else
-      {
-        Relocation newRelocation;
-        newRelocation.addend = reloc.addend;
-        newRelocation.offset = newROffset;
-        // Only param needed is relType, other ones are not important for nanoMIPS
-        newRelocation.expr = target->getRelExpr(newRelType, *reloc.sym, isec->data().data() + newROffset);
-        newRelocation.sym = reloc.sym;
-        newRelocation.type = newRelType;
-        // TODO: This will have to be changed, as we are messing with relocation numbers,
-        // needed for balc trampolines
-        isec->relocations.insert(isec->relocations.begin() + relNum, newRelocation);
-        relNum++;
-        LLVM_DEBUG(llvm::dbgs() << "Added new reloc " << reloc.type << "\n";);
-        // TODO: Setting reloc strategy for finalizing relocs
-      }
+    uint32_t newROffset = (insTemplate.getSize() == 6 ? offset + 2 : offset);
+    if(!newReloc)
+    {
+      // reloc.offset = newROffset;
+      // reloc.type = newRelType;
+      // Only param needed is relType, other ones are not important for nanoMIPS
+      reloc.expr = target->getRelExpr(newRelType, *reloc.sym, isec->data().data() + newROffset);
+      relocInfo[relNum].second = newRelType;
+      newReloc = true;
+      LLVM_DEBUG(llvm::dbgs() << "Changed current reloc to " << newRelType << "\n";);
+    }
+    else
+    {
+      Relocation newRelocation;
+      newRelocation.addend = reloc.addend;
+      newRelocation.offset = newROffset;
+      // Only param needed is relType, other ones are not important for nanoMIPS
+      newRelocation.expr = target->getRelExpr(newRelType, *reloc.sym, isec->data().data() + newROffset);
+      newRelocation.sym = reloc.sym;
+      newRelocation.type = newRelType;
+      // TODO: This will have to be changed, as we are messing with relocation numbers,
+      // needed for balc trampolines
+      relNum++;
+      isec->relocations.insert(isec->relocations.begin() + relNum, newRelocation);
+      // Adding this to relocInfo as well
+      // TODO: See if this can be processed in finalize not here, but here is fine
+      // as well as we have to generate a new reloc
+      relocInfo.insert(relocInfo.begin() + relNum, {0, R_NANOMIPS_NONE});
+      // Because there is more insns replacing previous ins
+      // we want to rewrite the
+      // last write that was here to point there is more instructions
+      // for this relocation
+      writes.back().second |= 1;
+
+      LLVM_DEBUG(llvm::dbgs() << "Added new reloc " << reloc.type << "\n";);
+      // TODO: Setting reloc strategy for finalizing relocs
     }
 
-
-    newInsns.emplace_back(newInsn, offset, insTemplate.getSize());
+    writes.emplace_back(newInsn, insTemplate.getSize());
+    // newInsns.emplace_back(newInsn, offset, insTemplate.getSize());
     LLVM_DEBUG(llvm::dbgs() << "New instruction " << insTemplate.getName() << ": 0x" << utohexstr(newInsn) << " to offset: 0x" << utohexstr(offset) << "\n");
     offset += insTemplate.getSize();
   }

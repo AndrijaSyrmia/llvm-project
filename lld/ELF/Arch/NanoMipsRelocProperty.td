@@ -229,11 +229,9 @@ def : TransformationTemplate<TT_BEQC32, BXXC16_P, (relocs PC4_S1), (insns BEQC32
 def : TransformationTemplate<TT_BNEC32, BXXC16_P, (relocs PC4_S1), (insns BNEC32_T<PC14_S1>)>;
 def : TransformationTemplate<TT_PCREL16, BEQC32_P, (relocs PC14_S1), (insns BEQC16_T<>)>;
 def : TransformationTemplate<TT_PCREL16_ZERO, BEQC32_P, (relocs PC14_S1), (insns BEQZC16_T<>)>;
-// Check next one out, how does it work?
 def : TransformationTemplate<TT_PCREL32_LONG, BEQC32_P, (relocs PC14_S1), (insns BNEC32_T<NONE>, BC32_T<>)>;
 def : TransformationTemplate<TT_PCREL16, BNEC32_P, (relocs PC14_S1), (insns BNEC16_T<>)>;
 def : TransformationTemplate<TT_PCREL16_ZERO, BNEC32_P, (relocs PC14_S1), (insns BNEZC16_T<>)>;
-// This one as well
 def : TransformationTemplate<TT_PCREL32_LONG, BNEC32_P, (relocs PC14_S1), (insns BEQC32_T<NONE>, BC32_T<>)>;
 def : TransformationTemplate<TT_PCREL32_LONG, BGEC_P, (relocs PC14_S1), (insns BLTC_T<>, BC32_T<>)>;
 def : TransformationTemplate<TT_PCREL32_LONG, BLTC_P, (relocs PC14_S1), (insns BGEC_T<>, BC32_T<>)>;

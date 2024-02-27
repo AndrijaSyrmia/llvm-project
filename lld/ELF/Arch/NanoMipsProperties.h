@@ -14,6 +14,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "InputFiles.h"
+#include "Symbols.h"
 
 #undef TRANSFORM_ENUM
 #define TRANSFORM_ENUM
@@ -27,8 +28,33 @@
 // Used for relaxation purposes
 
 
+// Copied from RISCV relaxations
+namespace {
+struct SymbolAnchor {
+  uint64_t offset;
+  lld::elf::Defined *d;
+  bool end; // True for the anchor of st_value+st_size (End of symbol)
+
+  SymbolAnchor(uint64_t off, lld::elf::Defined *defined, bool e) : offset(off), d(defined), end(e) {}
+};
+}
+
 namespace lld {
 namespace elf{
+
+  struct NanoMipsRelaxAux {
+  SmallVector<SymbolAnchor, 0> anchors;
+  // For relocations[i], the actual offset is r_offset - (i ? relocInfo.first[i - 1] : 0)
+  // and the actual type is relocInfo.second[i]
+  SmallVector<std::pair<int64_t, RelType>, 0> relocInfo;
+  // What should be written
+  // uint64_t is the instruction (maybe it can be implemented as 48bits to save space,
+  // or the top of uint64_t can be used), uint32_t is used to determine the size of inst
+  // and whether this relocation has more than one instruction to write (which happens during expansions)
+  // the sizes are 0, 2, 4, or 6 bytes and the last bit is used to determine is there more instructions
+  SmallVector<std::pair<uint64_t, uint32_t>, 0> writes;
+};
+
 
   template<class ELFT>
   bool isNanoMipsPcRel(const ObjFile<ELFT> *obj)
@@ -274,6 +300,7 @@ namespace elf{
       virtual const NanoMipsInsProperty *getInsProperty(uint64_t insn, uint64_t insnMask, RelType reloc, InputSectionBase *isec) const = 0;
       virtual const NanoMipsTransformTemplate *getTransformTemplate(const NanoMipsInsProperty *insProperty, const Relocation &reloc, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const = 0;
       virtual void updateSectionContent(InputSection *isec, uint64_t location, int32_t delta);
+      void setChanged() { changed = true; changedThisIteration = true; }
       bool getChanged() { return changed; }
       bool getChangedThisIteration() { return changedThisIteration; }
       void resetChanged() { changed = false; }
@@ -339,6 +366,7 @@ namespace elf{
 
       void initState();
       void changeState();
+      void setChanged() { this->currentState->setChanged(); }
       NanoMipsTransform::TransformKind getType() const { return this->currentState->getType(); }
       // should be called before change state
       bool shouldRunAgain() const { return this->currentState->getChanged(); }

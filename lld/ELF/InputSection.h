@@ -252,6 +252,11 @@ public:
     return llvm::makeArrayRef<T>((const T *)data().data(), s / sizeof(T));
   }
 
+  // Not needed in higher llvms
+  void setRawData(ArrayRef<uint8_t> data) {
+    rawData = data;
+  }
+
 protected:
   template <typename ELFT>
   void parseCompressedHeader();

@@ -80,6 +80,8 @@ static uint64_t readInsn(ArrayRef<uint8_t> data, uint64_t off, uint32_t insnSize
   if(insnSize == 6) return read16(&data[off - 2]);
   else if(insnSize == 4) return readShuffle32<E>(&data[off]);
   else if(insnSize == 2) return read16(&data[off]);
+  // Case when R_NANOMIPS_NONE is returned
+  // else if(insnSize == 0) return 0;
   else llvm_unreachable("Unknown byte size of nanoMIPS instruction (only 2, 4 and 6 known)");
 }
 
@@ -94,9 +96,22 @@ static void writeInsn(uint64_t insn, ArrayRef<uint8_t>data, uint64_t off, uint32
     else llvm_unreachable("Unknown byte size of nanoMIPS instruction (only 2, 4, and 6 known)");
 }
 
+template <endianness E>
+static void writeInsn(uint64_t insn, uint8_t *ptr, uint32_t insnSize)
+{
+    // assert(off + insnSize <= data.size() && "Overflow on buffer in writeInsn");
+    if (insnSize == 6) write16(ptr, (uint16_t)insn);
+    else if(insnSize == 4) writeShuffle32<E>(ptr,((uint32_t)insn));
+    else if(insnSize == 2) write16(ptr, (uint16_t)insn);
+    else llvm_unreachable("Unknown byte size of nanoMIPS instruction (only 2, 4, and 6 known)");
+}
+
+
 uint64_t elf::getNanoMipsPage(uint64_t expr) {
   return expr & ~static_cast<uint64_t>(0xFFF);
 }
+
+
 
 namespace {
 
@@ -130,6 +145,9 @@ private:
     void transform(InputSection *sec) const;
 
     void initTransformAuxInfo() const;
+    // sa is changed with every relocation that transforms
+    void updateTransformAuxInfo(InputSection *isec, Relocation &rel, ArrayRef<SymbolAnchor> &sa, int64_t delta) const;
+    void finalizeSecTransformation(InputSection *isec, int64_t totalDelta) const;
     // bool relax(InputSection *sec) const;
     // bool expand(InputSection *sec) const;
 };
@@ -397,25 +415,6 @@ bool NanoMips<ELFT>::safeToModify(InputSection *sec) const
   return modifiable;
 }
 
-// Copied from RISCV relaxations
-namespace {
-struct SymbolAnchor {
-  uint64_t offset;
-  Defined *d;
-  bool end; // True for the anchor of st_value+st_size (End of symbol)
-
-  SymbolAnchor(uint64_t off, Defined *defined, bool e) : offset(off), d(defined), end(e) {}
-};
-}
-
-struct elf::NanoMipsRelaxAux {
-  SmallVector<SymbolAnchor, 0> anchors;
-  // For relocations[i], the actual offset is r_offset - (i ? relocInfo.first[i - 1] : 0)
-  // and the actual type is relocInfo.second[i]
-  SmallVector<std::pair<int64_t, RelType>, 0> relocInfo;
-  // What should be written
-  SmallVector<uint64_t, 0> writes;
-};
 
 // TODO: Emit reloc option, somewhat different transformations
 template <class ELFT>
@@ -437,39 +436,13 @@ bool NanoMips<ELFT>::relaxOnce(int pass) const
           continue;
       for(InputSection *sec : getInputSections(osec))
       {
-        // if(pass == 0)
-        // {
-        //   llvm::outs() << "Relocs:\n";
-        //   for(Relocation& reloc: sec->relocations)
-        //   {
-
-        //     llvm::outs() << reloc.offset << ": " << reloc.type << "\n";
-        //   }
-        //   llvm::outs() << "Symbol anchors:\n";
-        //   std::string prefix = "";
-        //   NanoMipsRelaxAux *relaxAux = sec->nanoMipsRelaxAux;
-        //   for(auto &s : relaxAux->anchors)
-        //   {
-        //     if(s.end) prefix = prefix.erase(prefix.length() - 1);
-        //     llvm::outs() << prefix << s.offset << ": " << s.d->getName() << ", end: " << s.end << "\n";
-        //     if(!s.end) prefix += "\t";
-        //   }
-
-        // }
-        if(!this->safeToModify(sec) && sec->numRelocations == 0) continue;
+        if(!this->safeToModify(sec) || sec->numRelocations == 0) continue;
         this->transform(sec);
 
       }
     }
-
     changed = this->currentTransformation.shouldRunAgain();
     const_cast<NanoMipsTransformController &>(this->currentTransformation).changeState();
-    // if(!changed && config->expand && this->currentTransformState->getType() == NanoMipsTransform::TransformRelax)
-    // {
-    //   // Set changed to true to initiate a round of expansion transformations
-    //   changed = true;
-    //   this->currentTransformState = &expandTransform;
-    // }
   }
   return changed;
 }
@@ -479,11 +452,21 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
 {
   const uint32_t bits = config->wordsize * 8;
   uint64_t secAddr = sec->getOutputSection()->addr + sec->outSecOff;
+
+
+  NanoMipsRelaxAux &aux = *sec->nanoMipsRelaxAux;
+  MutableArrayRef<SymbolAnchor> sa = makeMutableArrayRef(aux.anchors.data(), aux.anchors.size());
+  int64_t totalDelta = 0; 
+  // std::fill_n(aux.relocInfo.data(), sec->relocations.size(), std::pair<int64_t, RelType>(0, R_NANOMIPS_NONE));
+  aux.relocInfo.insert(aux.relocInfo.begin(), sec->relocations.size(), std::pair<int64_t, RelType>(0, R_NANOMIPS_NONE));
+  aux.writes.clear();
   // Need to do it like this bc at transform we may invalidate the iterator
   // TODO: Relocs are not sorted by offset, check if they should be?
   for(uint32_t relNum = 0; relNum < sec->relocations.size(); relNum++)
   {
     Relocation &reloc = sec->relocations[relNum];
+    if(reloc.type == R_NANOMIPS_NONE) continue;
+    int64_t &curRelDelta = aux.relocInfo[relNum].first;
     // TODO: Check if section should be compressed when returning value
     uint64_t addrLoc = secAddr + reloc.offset;
     uint64_t valueToRelocate = llvm::SignExtend64(sec->getRelocTargetVA(sec->file, reloc.type, reloc.addend, addrLoc, *reloc.sym, reloc.expr), bits);
@@ -492,7 +475,7 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
 
     uint32_t instSize = relocProp->getInstSize();
     // 48 bit instruction reloc offsets point to 32 bit imm/off not to the beginning of ins
-    uint32_t relocOffset = reloc.offset - (instSize == 6 ? 2 : 0);
+    uint64_t relocOffset = reloc.offset - (instSize == 6 ? 2 : 0);
     uint64_t insn = readInsn<ELFT::TargetEndianness>(sec->data(), reloc.offset, instSize);
 
     uint64_t insMask = relocProp->getMask();
@@ -519,7 +502,6 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
 
     // TODO: Undef weak symbols
     const NanoMipsTransformTemplate *transformTemplate = this->currentTransformation.getTransformTemplate(insProperty, reloc, valueToRelocate, insn, sec);
-
     if(!transformTemplate) continue;
 
     LLVM_DEBUG( 
@@ -529,21 +511,51 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
     // TODO: gold creates a new nanomips input section, check if it is needed?
 
     // Bytes to remove/add
-    int32_t delta = transformTemplate->getSizeOfTransform() - instSize;
-    if(delta != 0)
-      this->currentTransformation.updateSectionContent(sec, relocOffset + instSize, delta);
+    int32_t delta =  instSize - transformTemplate->getSizeOfTransform();
+    for(; sa.size() && sa[0].offset <= relocOffset; sa = sa.slice(1))
+    {
+      if(sa[0].end) sa[0].d->size = sa[0].offset - totalDelta + sa[0].d->value;
+      else { 
+        sa[0].d->value = sa[0].offset - totalDelta;
+        sa[0].offset = sa[0].d->value;
+      }
+    }
+    totalDelta += delta;
+    if(totalDelta != curRelDelta)
+      curRelDelta = totalDelta;
+
+
+
+    // if(delta != 0)
+      // this->currentTransformation.updateSectionContent(sec, relocOffset + instSize, delta);
 
     // Transform
     this->currentTransformation.transform(reloc, transformTemplate, insProperty, sec, insn, relNum);
 
-    auto &newInsns = this->currentTransformation.getNewInsns();
-    for(auto &newInsn : newInsns)
-    {
-      writeInsn<ELFT::TargetEndianness>(newInsn.insn, sec->data(), newInsn.offset, newInsn.size);
-    }
-    newInsns.clear();
+    // auto &newInsns = this->currentTransformation.getNewInsns();
+    // for(auto &newInsn : newInsns)
+    // {
+    //   writeInsn<ELFT::TargetEndianness>(newInsn.insn, sec->data(), newInsn.offset, newInsn.size);
+    // }
+    // newInsns.clear();
     // Finalize content?
   }
+  if(totalDelta != 0)
+  {
+    for(SymbolAnchor &a : sa)
+    {
+      if(a.end) a.d->size = a.offset - totalDelta + a.d->value;
+      else {
+        a.d->value = a.offset - totalDelta;
+        a.offset = a.d->value;
+      }
+    }
+    const_cast<NanoMipsTransformController &>(this->currentTransformation).setChanged();
+    // TODO: Check if there are some relaxations/expansions that preserve byte count
+    finalizeSecTransformation(sec, totalDelta);
+  }
+
+
   return;
 }
 
@@ -602,230 +614,90 @@ void NanoMips<ELFT>::initTransformAuxInfo() const
   }
 }
 
-// bool NanoMips::relax(InputSection *sec) const {
+template <class ELFT>
+void NanoMips<ELFT>::finalizeSecTransformation(InputSection *isec, int64_t totalDelta) const {
 
-//   auto &relocations = sec->relocations;
-//   bool changed = false;
-//   const uint32_t bits = config->wordsize * 8;
-//   uint64_t secAddr = sec->getOutputSection()->addr + sec->outSecOff;
-//   for(auto &reloc : relocations)
-//   {
-//     // TODO: Check if section should be compressed when returning value
-//     ArrayRef<uint8_t> oldContent = sec->data();
-//     uint64_t oldSize = sec->getSize();
-//     uint64_t addrLoc = secAddr + reloc.offset;
-//     uint64_t valueToRelocate = SignExtend64(sec->getRelocTargetVA(sec->file, reloc.type, reloc.addend, addrLoc, *reloc.sym, reloc.expr), bits);
-//     const NanoMipsRelocProperty *relocProp =  relocPropertyTable.getRelocProperty(reloc.type);
-//     if(relocProp)
-//     {
-//       llvm::outs() << relocProp->getName() << "\n";
-//     }
-//     switch(reloc.type)
-//     {
-//       case R_NANOMIPS_PC14_S1:
-//       {
-//         uint64_t insn = support::endian::read32le(&oldContent[reloc.offset]);
-//         // For more natural working with instruction
-//         insn = bswap(insn);
-//         // Check if it is a beqc instruction
-//         // TODO: Make this prettier
-//         if((insn >> 26) != 0x22 || ((insn >> 14) & 0x3) != 0x00) break; 
-//         // 4 is the size of instruction
-//         valueToRelocate -= 4;
-//         // TODO: Make extract bits function
-//         uint32_t srcReg =  (insn >> 16) & 0x1f;
-//         uint32_t dstReg = (insn >> 21) & 0x1f;
-//         // TODO: Check if we should change the value for relocation, as we are going to generate a 2 byte instruciton
-//         // FIXME: srcReg and dstReg not good, shouldn't only be less than 7
-//         if(valueToRelocate != 0 && srcReg != 0 && srcReg <= 7 && dstReg <= 7 && srcReg != dstReg && isUInt<5>(valueToRelocate))
-//         {
-//           // New instruction is smaller for 2 bytes
-//           // TODO: Used make_unique here, as I know how to use it, should change to some sort of allocator
-//           // like the BumpPointerAllocator that is being used in InputSection, this is also very inefficient 
-//           // as there is a lot of unecessary copying but it is used to check if this will work
-//           auto newContentUnique = std::make_unique<uint8_t>((oldSize - 2) * sizeof(uint8_t));
-//           uint8_t *newContent = newContentUnique.get();
-//           uint64_t newSize = oldSize - 2;
-//           // Swap src and dest if they don't conform to the abi (rs3<rt3)
-//           if(srcReg > dstReg)
-//           {
-//             uint32_t tmp = srcReg;
-//             srcReg = dstReg;
-//             dstReg = tmp;
-//           }
-//           uint32_t newIns = 0x36 << 10 | (dstReg & 7) << 7 | (srcReg & 7) << 4 | 0;
-//           uint32_t oldI = 0;
-//           uint32_t newI = 0;
-//           while(oldI != oldSize)
-//           {
-//             if(oldI != reloc.offset)
-//             {
-//               newContent[newI] = oldContent[oldI];
-//               newI++;
-//               oldI++;
-//             }
-//             else{
-//               support::endian::write16le(newContent + newI, newIns);
-//               newI += 2;
-//               oldI += 4;
-//             }
-//           }
-//           newI = 0;
-//           while(newI != newSize)
-//           {
-//             const_cast<uint8_t *>(oldContent.data())[newI] = newContent[newI];
-//             newI++;
-//           }
-//           // Inefficient as well, change relocs to have good offset
-//           for(auto &reloc2 : relocations)
-//           {
-//             if(reloc2.offset > reloc.offset)
-//               reloc2.offset -= 2;
-//           }
+  NanoMipsRelaxAux &aux = *isec->nanoMipsRelaxAux;
+  // No need to do anything if we have nothing to change
+  assert(aux.writes.size() != 0);
+  ArrayRef<uint8_t> oldData = isec->data();
+  size_t newSize = oldData.size() - totalDelta;
+  size_t writesIdx = 0;
+  // TODO: Check later if the linker eats up a lot of memory
+  // it is probably because of this, make a better way to do
+  // this (relaxations can be definitely done without new section containers)
+  uint8_t *p = bAlloc.Allocate<uint8_t>(newSize);
+  isec->setRawData(makeArrayRef(p, newSize));
+  isec->bytesDropped = 0;
+  // How much delta did we pass already
+  int64_t delta = 0;
+  // Where we got in the section
+  uint64_t offset = 0;
+  for(size_t i = 0, e = isec->relocations.size(); i < e; i++)
+  {
+    // TODO: Check this if statement
+    if(aux.relocInfo[i].first == 0) continue;
+    int64_t curDelta = aux.relocInfo[i].first - delta;
+    delta = aux.relocInfo[i].first;
+    // if(curDelta == 0 && aux.relocInfo[i].second == R_NANOMIPS_NONE)
+    //   continue;
 
-//           // Inefficient as well, adjust symbols
-//           // TODO: Change size of function
-//           if(sec->file)
-//           {
-//             for(auto *sym: sec->file->symbols)
-//             {
-//               if(isa<Defined>(sym))
-//               {
-//                 auto dSym = cast<Defined>(sym);
-//                 if(sym->getOutputSection() && sym->getOutputSection()->sectionIndex == sec->getOutputSection()->sectionIndex)
-//                 {
-//                   if(dSym->value > reloc.offset)
-//                   {
-//                     dSym->value -= 2;
-//                   }
-//                 }
-//               }
+    const Relocation &rel = isec->relocations[i];
+    const NanoMipsRelocProperty *relocProp = relocPropertyTable.getRelocProperty(rel.type);
+    uint32_t relOffset = rel.offset - (relocProp->getInstSize() == 6 ? 2 : 0);
+    uint64_t size = relOffset - offset;
+    memcpy(p, oldData.data() + offset, size);
+    p += size;
 
-//             }
-//           }
-//           reloc.type = R_NANOMIPS_PC4_S1;
-//           sec->drop_back(oldSize - newSize);
-//           changed = true;
-//         }
-//         else if(srcReg == 0 && isInt<8>(valueToRelocate))
-//         {
-//           // TODO
-//           llvm::outs() << "Can relocate to beqz version, but not implemented yet!\n";
-//         }
-//         break;
-//       }
-//       default:
-//         break;
-//     }
-//   }
-//   return changed;
-// }
+    do {
+      uint64_t write = aux.writes[writesIdx].first;
+      uint32_t writeSize = aux.writes[writesIdx].second & (-1UL << 1);
+      writeInsn<ELFT::TargetEndianness>(write, p, writeSize);
+      p += writeSize;
+    } while(aux.writes[writesIdx++].second & 1);
 
-// TODO: Check if we can mix these into relax and expand into one function
-// bool NanoMips::expand(InputSection *sec) const {
-//   llvm::outs() << "expand called\n";
-//   auto &relocations = sec->relocations;
-//   bool changed = false;
-//   const uint32_t bits = config->wordsize * 8;
-//   const uint64_t secAddr = sec->getOutputSection()->addr + sec->outSecOff;
-//   for(auto &reloc: relocations)
-//   {
-//     // TODO: Check if section should be compressed when returning value
-//     ArrayRef<uint8_t> oldContent = sec->data();
-//     uint64_t oldSize = sec->getSize();
-//     uint64_t addrLoc = secAddr + reloc.offset;
-//     uint64_t valueToRelocate = SignExtend64(sec->getRelocTargetVA(sec->file, reloc.type, reloc.addend, addrLoc, *reloc.sym, reloc.expr), bits);
-//     switch(reloc.type)
-//     {
-//       case R_NANOMIPS_PC21_S1:
-//       {
-//         llvm::outs() << "Expansion of R_NANOMIPS_PC21_S1\n";
-//         valueToRelocate -= 4;
-//         uint32_t insn = support::endian::read32le(&oldContent[reloc.offset]);
-//         insn = bswap(insn);
-//         // lapc
-//         llvm::outs() << insn << "\n";
-//         if((insn >> 26) != 0x1) break;
-//         llvm::outs() << "Expansion of lapc\n";
-//         uint32_t dstReg = (insn >> 21) & 0x1f;
+    offset = relOffset + relocProp->getInstSize();
+  }
+  memcpy(p, oldData.data() + offset, oldData.size() - offset);
 
-//         if((valueToRelocate & 0x1) == 0 && !isInt<22>(valueToRelocate))
-//         {
-//           auto newContentUnique = std::make_unique<uint8_t>((oldSize + 2) * sizeof(uint8_t));
-//           uint8_t *newContent = newContentUnique.get();
-//           uint64_t newSize = oldSize + 2;
-//           uint64_t newIns = 0x18UL << 42 | static_cast<uint64_t>(dstReg) << 37 | 0x3UL << 32 | 0x0UL;
-//           newIns = bswap48(newIns);
-//           uint32_t oldI = 0;
-//           uint32_t newI = 0;
-//           llvm::outs() << newIns << "\n";
-//           while(oldI != oldSize)
-//           {
-//             if(oldI != reloc.offset)
-//             {
-//               newContent[newI] = oldContent[oldI];
-//               newI++;
-//               oldI++;
-//             }
-//             else{
-//               support::endian::write32le(newContent + newI, newIns & 0xffffffffL);
-//               support::endian::write16le(newContent + newI + 4, newIns >> 32);
-//               newI += 6;
-//               oldI += 4;
-//             }
-//           }
-
-//           llvm::outs() << sec->bytesDropped << "\n";
-//           if(sec->bytesDropped < 2)
-//           {
-//             sec->increaseSizeOfSection(2 - sec->bytesDropped);
-//           }
-//           oldContent = sec->data();
-//           sec->push_back(newSize - oldSize);
-//           newI = 0;
-//           while(newI != newSize)
-//           {
-//             const_cast<uint8_t *>(oldContent.data())[newI] = newContent[newI];
-//             llvm::outs() << (uint32_t)newContent[newI] << "\n";
-//             newI++;
-//           }
-
-//           for(auto &reloc2: relocations)
-//           {
-//             if(reloc2.offset > reloc.offset)
-//               reloc2.offset += 2;
-//           }
-
-//           if(sec->file)
-//           {
-//             for(auto *sym : sec->file->symbols)
-//             {
-//               if(isa<Defined>(sym))
-//               {
-//                 auto dSym = cast<Defined>(sym);
-//                 if(sym->getOutputSection() && sym->getOutputSection()->sectionIndex == sec->getOutputSection()->sectionIndex)
-//                 {
-//                   if(dSym->value > reloc.offset)
-//                     dSym->value += 2;
-//                 }
-//               }
-//             }
-//           }
-
-//           reloc.type = R_NANOMIPS_PC_I32;
-//           reloc.offset += 2;
-//           // TODO: See what to do about the assert in this function, we need to see how to change the size of sections
-//           changed = true;
-//         }
-//       }
-//         break;
-//       default:
-//         break;
-//     }
-//   }
-//   return changed;
-// }
-
+  // adjust relocs
+  delta = 0;
+  int64_t prevDelta = 0;
+  writesIdx = 0;
+  for(size_t i = 0, e = isec->relocations.size(); i < e; i++)
+  {
+    if(i != 0 && aux.relocInfo[i - 1].first)
+    {
+      prevDelta = delta;
+      delta = aux.relocInfo[i - 1].first;
+    }
+    // uint64_t cur = isec->relocations[i].offset;
+    // do {
+    if(aux.relocInfo[i].first != 0)
+    {
+      isec->relocations[i].offset -= delta;
+      writesIdx++;
+      const NanoMipsRelocProperty *relocProperty = relocPropertyTable.getRelocProperty(isec->relocations[i].type);
+      const NanoMipsRelocProperty *relocPropertyTransform = relocPropertyTable.getRelocProperty(aux.relocInfo[i].second);
+      isec->relocations[i].type = aux.relocInfo[i].second;
+      // for 6-byte instruction reloc offset points to the last 4 bytes not to beginning of ins
+      if(relocProperty->getInstSize() == 6 && relocPropertyTransform->getInstSize() != 6)
+        isec->relocations[i].offset -= 2;
+      else if(relocProperty->getInstSize() != 6 && relocPropertyTransform->getInstSize() == 6)
+        isec->relocations[i].offset += 2;
+    }
+    // This means that the instruction was separated to more than one reloc
+    else if(writesIdx != 0 && (aux.writes[writesIdx - 1].second & 1))
+    {
+      isec->relocations[i].offset -= prevDelta;
+      writesIdx++;
+    }
+    else {
+      isec->relocations[i].offset -= delta;
+    }
+    // } while (++i != e && isec->relocations[i].offset == cur);
+  }
+}
 
 
 template TargetInfo *elf::getNanoMipsTargetInfo<ELF32LE>();
