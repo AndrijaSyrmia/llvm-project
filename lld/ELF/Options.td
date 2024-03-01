@@ -695,7 +695,6 @@ def: F<"no-copy-dt-needed-entries">;
 def: F<"no-ctors-in-init-array">;
 def: F<"no-keep-memory">;
 def: F<"no-pipeline-knowledge">;
-// def: F<"no-relax">;
 def: F<"no-warn-mismatch">;
 def: Flag<["-"], "p">;
 def: Separate<["--", "-"], "rpath-link">;
@@ -725,6 +724,15 @@ defm insn32: BB<"insn32",
 defm relax_lo12: BB<"relax-lo12",
     "(nanoMIPS only) Relax R_NANOMIPS_LO12 relocation",
     "(nanoMIPS only) Do not relax R_NANOMIPS_LO12 relocation (default)"
+>;
+
+defm fix_nmips_hw110880: BB<"fix-nmips-hw110880",
+    "(nanoMIPS only) Rewrite instructions to avoid hw110880 issue",
+    "(nanoMIPS only) Do not rewrite instructions to avoid hw110880 issue (default)"
+>;
+
+defm expand_reg: EEq<"expand-reg",
+    "(nanoMIPS only) Set the register that will be used in expansions (default $1 - pass the value without dollar sign)"
 >;
 
 // Hidden option used for testing MIPS multi-GOT implementation.

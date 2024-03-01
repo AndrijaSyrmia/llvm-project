@@ -188,6 +188,7 @@ struct Configuration {
   bool mergeArmExidx;
   bool mipsN32Abi = false;
   bool mmapOutputFile;
+  bool nanoMipsFixHw110880;
   bool nanoMipsInsn32;
   bool nanoMipsRelaxLo12;
   bool nmagic;
@@ -277,6 +278,7 @@ struct Configuration {
   unsigned ltoPartitions;
   unsigned ltoo;
   unsigned optimize;
+  unsigned nanoMipsExpandReg;
   StringRef thinLTOJobs;
   unsigned timeTraceGranularity;
   int32_t splitStackAdjustSize;
