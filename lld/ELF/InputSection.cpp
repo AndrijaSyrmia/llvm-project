@@ -769,6 +769,8 @@ uint64_t InputSectionBase::getRelocTargetVA(const InputFile *file, RelType type,
     return sym.getVA(a);
   case R_ADDEND:
     return a;
+  case R_RELAX_HINT:
+    return 0;
   case R_NANOMIPS_NEG_COMPOSITE:
     return -sym.getVA(-a);
   case R_ARM_SBREL:
