@@ -156,6 +156,7 @@ NanoMips<ELFT>::NanoMips(): currentTransformation(&insPropertyTable) {
   llvm::dbgs() << "insn32: " << config->nanoMipsInsn32 << "\n";
   llvm::dbgs() << "fix_nmips_hw110880: " << config->nanoMipsFixHw110880 << "\n"; 
   llvm::dbgs() << "expand_reg: " << config->nanoMipsExpandReg << "\n";
+  llvm::dbgs() << "strict_address_modes: " << config->nanoMipsStrictAddressModes << "\n";
   );
   this->currentTransformation.initState();
 }
@@ -380,7 +381,6 @@ void NanoMips<ELFT>::relocate(uint8_t *loc, const Relocation &rel, uint64_t val)
     writeValue32be<ELFT::TargetEndianness>(loc, val, 17, 1);
     break;
   case R_NANOMIPS_GPREL_LO12:
-    checkInt(loc, val, 12, rel);
     writeValue32be<ELFT::TargetEndianness>(loc, val, 12, 0);
     break;
   default:
@@ -456,6 +456,7 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
   NanoMipsContextProperties &contextProperties = this->currentTransformation.getContextProperties();
   contextProperties.fullNanoMipsISA = NanoMipsAbiFlagsSection<ELFT>::get()->isFullNanoMipsISA(sec);
   auto *obj = sec->getFile<ELFT>();
+
   // TODO: Don't know if there isn't an object file (and why it isn't there)
   // what to put in as pcrel, for now it is false
   contextProperties.pcrel = obj ? isNanoMipsPcRel<ELFT>(obj) : false;
@@ -463,6 +464,9 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
   uint64_t secAddr = sec->getOutputSection()->addr + sec->outSecOff;
   // Need to do it like this bc at transform we may invalidate the iterator
   // TODO: Relocs are not sorted by offset, check if they should be?
+  // TODO: Comdat behaviour?
+  // TODO: GP setup from gold is different than lld, probably should change it
+  // also probably should make ElfSym::nanoMipsGp - as it represents this better
   for(uint32_t relNum = 0; relNum < sec->relocations.size(); relNum++)
   {
     Relocation &reloc = sec->relocations[relNum];
