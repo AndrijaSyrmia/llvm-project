@@ -33,6 +33,7 @@ class OutputSection;
 
 extern std::vector<Partition> partitions;
 
+struct NanoMipsRelaxAux;
 // This is the base class of all sections that lld handles. Some are sections in
 // input files, some are sections in the produced output file and some exist
 // just as a convenience for implementing special ways of combining some
@@ -232,6 +233,10 @@ public:
   // basic blocks.
   SmallVector<JumpInstrMod, 0> jumpInstrMods;
 
+  // Will be in union with others in higher llvms
+  NanoMipsRelaxAux *nanoMipsRelaxAux = nullptr;
+
+
   // A function compiled with -fsplit-stack calling a function
   // compiled without -fsplit-stack needs its prologue adjusted. Find
   // such functions and adjust their prologues.  This is very similar
@@ -245,6 +250,11 @@ public:
     size_t s = data().size();
     assert(s % sizeof(T) == 0);
     return llvm::makeArrayRef<T>((const T *)data().data(), s / sizeof(T));
+  }
+
+  // Not needed in higher llvms
+  void setRawData(ArrayRef<uint8_t> data) {
+    rawData = data;
   }
 
 protected:
@@ -401,11 +411,13 @@ private:
   template <class ELFT> void copyShtGroup(uint8_t *buf);
 };
 
+// TODO: Return for WIN32 to 192 and for else 184, this is changed
+// so I can put nanoMipsRelaxAux
 #ifdef _WIN32
-static_assert(sizeof(InputSection) <= 192, "InputSection is too big");
+  static_assert(sizeof(InputSection) <= 196, "InputSection is too big");
 #else
-static_assert(sizeof(InputSection) <= 184, "InputSection is too big");
-#endif
+  static_assert(sizeof(InputSection) <= 192, "InputSection is too big");
+ #endif
 
 inline bool isDebugSection(const InputSectionBase &sec) {
   return (sec.flags & llvm::ELF::SHF_ALLOC) == 0 &&

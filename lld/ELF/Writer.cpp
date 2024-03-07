@@ -1794,6 +1794,9 @@ template <class ELFT> void Writer<ELFT>::finalizeAddressDependentContent() {
     }
   }
 
+  // Only used for nanoMIPS for now
+  target->finalizeRelaxations();
+
   // If addrExpr is set, the address may not be a multiple of the alignment.
   // Warn because this is error-prone.
   for (BaseCommand *cmd : script->sectionCommands)
