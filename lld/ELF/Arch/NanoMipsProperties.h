@@ -39,9 +39,17 @@ namespace {
 namespace lld {
 namespace elf{
 
+  enum NanoMipsRelocStrategy: uint8_t{
+    RELOC_COPY = 0, // Default, leads to normal behaviour
+    RELOC_RESOLVE,
+    RELOC_DISCARD
+  };
   struct NanoMipsRelaxAux {
     uint32_t prevBytesDropped;
     SmallVector<SymbolAnchor, 0> anchors;
+    // If -r option is given with finalizing relocs of some kind
+    // here we store data if reloc can be resolved or discarded
+    SmallVector<NanoMipsRelocStrategy, 0> resolveReloc;
   };
   
   class NanoMipsRelocProperty;
@@ -264,11 +272,6 @@ namespace elf{
 
     NewInsnToWrite(uint64_t i, uint32_t off, uint32_t sz) : insn(i), offset(off), size(sz) {}
   };
-  enum NanoMipsTransformationEnum {
-    NANOMIPS_NONE_STATE,
-    NANOMIPS_RELAX_STATE,
-    NANOMIPS_EXPAND_STATE
-  };
 
   struct NanoMipsContextProperties {
     bool fullNanoMipsISA;
@@ -288,7 +291,7 @@ namespace elf{
       NanoMipsTransform(const NanoMipsInsPropertyTable *tbl): insPropertyTable(tbl) {}
       virtual ~NanoMipsTransform() {}
       virtual const NanoMipsInsProperty *getInsProperty(uint64_t insn, uint64_t insnMask, RelType reloc, InputSectionBase *isec) const = 0;
-      virtual const NanoMipsTransformTemplate *getTransformTemplate(const NanoMipsInsProperty *insProperty, const Relocation &reloc, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const = 0;
+      virtual const NanoMipsTransformTemplate *getTransformTemplate(const NanoMipsInsProperty *insProperty, uint32_t relNum, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const = 0;
       virtual void updateSectionContent(InputSection *isec, uint64_t location, int32_t delta, bool align = false);
       bool getChanged() { return changed; }
       bool getChangedThisIteration() { return changedThisIteration; }
@@ -322,8 +325,8 @@ namespace elf{
       NanoMipsTransformExpand(const NanoMipsInsPropertyTable *tbl): NanoMipsTransform(tbl) { assert(insPropertyTable); }
       TransformKind getType() const override { return TransformExpand; }
       const NanoMipsInsProperty *getInsProperty(uint64_t insn, uint64_t insnMask, RelType reloc, InputSectionBase *isec) const override;
-      const NanoMipsTransformTemplate *getTransformTemplate(const NanoMipsInsProperty *insProperty, const Relocation &reloc, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const override;
-    private:
+      const NanoMipsTransformTemplate *getTransformTemplate(const NanoMipsInsProperty *insProperty, uint32_t relNum, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const override;
+    protected:
     const NanoMipsTransformTemplate *getExpandTransformTemplate(const NanoMipsInsProperty *insProperty, const Relocation &reloc, uint64_t insn, const InputSection *isec) const;
   };
 
@@ -338,7 +341,7 @@ namespace elf{
       }
       TransformKind getType() const override { return TransformRelax; }
       const NanoMipsInsProperty *getInsProperty(uint64_t insn, uint64_t insnMask, RelType reloc, InputSectionBase *isec) const override;
-      const NanoMipsTransformTemplate *getTransformTemplate(const NanoMipsInsProperty *insProperty, const Relocation &reloc, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const override;
+      const NanoMipsTransformTemplate *getTransformTemplate(const NanoMipsInsProperty *insProperty, uint32_t relNum, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const override;
   };
 
 
@@ -348,13 +351,28 @@ namespace elf{
       NanoMipsTransformNone(const NanoMipsInsPropertyTable *): NanoMipsTransform(nullptr) {}
       TransformKind getType() const override { return TransformNone; }
       const NanoMipsInsProperty *getInsProperty(uint64_t insn, uint64_t insnMask, RelType reloc, InputSectionBase *isec) const override { return nullptr; }
-      const NanoMipsTransformTemplate *getTransformTemplate(const NanoMipsInsProperty *insProperty, const Relocation &reloc, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const override { return nullptr; }
+      const NanoMipsTransformTemplate *getTransformTemplate(const NanoMipsInsProperty *insProperty, uint32_t relNum, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const override { return nullptr; }
 
   };
 
+  // Used for relaxations on finalize_pcrel_relocs or finalize_relocs
+  class NanoMipsTransformRelaxFinalize: public NanoMipsTransformRelax {
+    public:
+      NanoMipsTransformRelaxFinalize(const NanoMipsInsPropertyTable *tbl): NanoMipsTransformRelax(tbl) {}
+      const NanoMipsTransformTemplate *getTransformTemplate(const NanoMipsInsProperty *insProperty, uint32_t relNum, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const override;
+  };
+
+  // Used for expansion on finalize_pcrel_relocs or finalize_relocs
+  class NanoMipsTransformExpandFinalize: public NanoMipsTransformExpand {
+    public:
+      NanoMipsTransformExpandFinalize(const NanoMipsInsPropertyTable *tbl): NanoMipsTransformExpand(tbl) {}
+      const NanoMipsTransformTemplate *getTransformTemplate(const NanoMipsInsProperty *insProperty, uint32_t relNum, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const override;
+  };
+
+
   class NanoMipsTransformController {
     public:
-      NanoMipsTransformController(const NanoMipsInsPropertyTable *tbl): transformRelax(tbl), transformExpand(tbl), transformNone(tbl), currentState(&transformNone){}
+      NanoMipsTransformController(const NanoMipsInsPropertyTable *tbl): transformRelax(tbl), transformExpand(tbl), transformNone(tbl), transformRelaxFinalize(tbl), transformExpandFinalize(tbl), currentState(&transformNone){}
 
       void initState();
       void changeState(int pass);
@@ -366,8 +384,8 @@ namespace elf{
       bool shouldRunAgain() const { return this->currentState->getChanged(); }
       const NanoMipsInsProperty *getInsProperty(uint64_t insn, uint64_t insnMask, RelType reloc, InputSectionBase *isec) const 
       { return this->currentState->getInsProperty(insn, insnMask, reloc, isec); }
-      const NanoMipsTransformTemplate *getTransformTemplate(const NanoMipsInsProperty *insProperty, const Relocation &reloc, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const
-      { return this->currentState->getTransformTemplate(insProperty, reloc, valueToRelocate, insn, isec);}
+      const NanoMipsTransformTemplate *getTransformTemplate(const NanoMipsInsProperty *insProperty, uint32_t relNum, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const
+      { return this->currentState->getTransformTemplate(insProperty, relNum, valueToRelocate, insn, isec);}
 
       void updateSectionContent(InputSection *isec, uint64_t location, int32_t delta, bool align = false) const { this->currentState->updateSectionContent(isec, location, delta, align);}
       void transform(Relocation *reloc, const NanoMipsTransformTemplate *transformTemplate, const NanoMipsInsProperty *insProperty, const NanoMipsRelocProperty *relocProperty, InputSection *isec, uint64_t insn, uint32_t &relNum) const
@@ -380,6 +398,8 @@ namespace elf{
       NanoMipsTransformRelax transformRelax;
       NanoMipsTransformExpand transformExpand;
       NanoMipsTransformNone transformNone;
+      NanoMipsTransformRelaxFinalize transformRelaxFinalize;
+      NanoMipsTransformExpandFinalize transformExpandFinalize;
       // This should be declared after transforms
       NanoMipsTransform *currentState;
       // There can be an infinite loop between relax and expand

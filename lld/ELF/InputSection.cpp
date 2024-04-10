@@ -161,6 +161,7 @@ void InputSectionBase::addBytes(uint64_t location, uint32_t count)
     size_t size = (this->size + count - bytesDropped) * 2;
     uint8_t *increasedData;
     {
+      // TODO: Check if mutex is necessary, as this is not concurrent
       static std::mutex mu;
       std::lock_guard<std::mutex> lock(mu);
       // TODO: Check if this can eat up a lot of memory

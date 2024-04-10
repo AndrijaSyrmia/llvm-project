@@ -632,6 +632,10 @@ void NanoMipsTransform::transform(Relocation *reloc, const NanoMipsTransformTemp
         newRelocation.type = newRelType;
         relNum++;
         isec->relocations.insert(isec->relocations.begin() + relNum, newRelocation);
+        // If there is a new relocation just copy the strategy from their parent reloc
+        // (In this case this is always RELOC_COPY, the default one)
+        if(config->relocatable && (config->nanoMipsFinalizePCRelRelocs || config->nanoMipsFinalizeRelocs))
+          isec->nanoMipsRelaxAux->resolveReloc.insert(isec->nanoMipsRelaxAux->resolveReloc.begin() + relNum, isec->nanoMipsRelaxAux->resolveReloc[relNum]);
         // Because we add a relocation, it might invalidate our previous reloc!
         reloc = &isec->relocations[relNum - 1];
         LLVM_DEBUG(llvm::dbgs() << "Added new reloc " << newRelType << "\n";);
@@ -752,8 +756,9 @@ const NanoMipsInsProperty *NanoMipsTransformRelax::getInsProperty(uint64_t insn,
   return insProperty;
 }
 
-const NanoMipsTransformTemplate *NanoMipsTransformRelax::getTransformTemplate(const NanoMipsInsProperty *insProperty, const Relocation &reloc, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const
+const NanoMipsTransformTemplate *NanoMipsTransformRelax::getTransformTemplate(const NanoMipsInsProperty *insProperty, uint32_t relNum, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const
 {
+  const Relocation &reloc = isec->relocations[relNum];
   const uint32_t bits = config->wordsize * 8;
   uint64_t gpVal = SignExtend64(ElfSym::mipsGp->value, bits);
   // TODO: Maybe it is not possible to have val & 0x1 not equal to 0 at some cases
@@ -864,11 +869,12 @@ const NanoMipsInsProperty * lld::elf::NanoMipsTransformExpand::getInsProperty(ui
   return nullptr;
 }
 
-const NanoMipsTransformTemplate *lld::elf::NanoMipsTransformExpand::getTransformTemplate(const NanoMipsInsProperty * insProperty, const Relocation & reloc, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const
+const NanoMipsTransformTemplate *lld::elf::NanoMipsTransformExpand::getTransformTemplate(const NanoMipsInsProperty * insProperty, uint32_t relNum, uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const
 {
   // TODO: Maybe it is not possible to have val & 0x1 not equal to 0 at some cases
   // check this
   // TODO: Check if pcrel and/or abs is respected well
+  const Relocation &reloc = isec->relocations[relNum];
   const uint32_t bits = config->wordsize * 8;
   uint64_t gpVal = SignExtend64(ElfSym::mipsGp->value, bits);
   switch(reloc.type)
@@ -1099,15 +1105,71 @@ const NanoMipsTransformTemplate *lld::elf::NanoMipsTransformExpand::getExpandTra
   }
 }
 
+// NanoMipsTransformRelaxFinalize
+
+const NanoMipsTransformTemplate *
+lld::elf::NanoMipsTransformRelaxFinalize::getTransformTemplate(
+    const NanoMipsInsProperty *insProperty, uint32_t relNum,
+    uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const {
+  
+  assert(isec->nanoMipsRelaxAux->resolveReloc.size() != 0);
+
+  llvm::outs() << "Here 1\n"; 
+  if(isec->nanoMipsRelaxAux->resolveReloc[relNum] != RELOC_RESOLVE)
+    return nullptr;
+  else
+    return NanoMipsTransformRelax::getTransformTemplate(insProperty, relNum, valueToRelocate, insn, isec);
+}
+
+// NanoMipsTransformExpandFinalize
+
+const NanoMipsTransformTemplate *
+lld::elf::NanoMipsTransformExpandFinalize::getTransformTemplate(
+    const NanoMipsInsProperty *insProperty, uint32_t relNum,
+    uint64_t valueToRelocate, uint64_t insn, const InputSection *isec) const {
+  
+  // TODO: code and data model transformations
+  const Relocation &reloc = isec->relocations[relNum];
+  if(reloc.type == R_NANOMIPS_GOT_CALL ||
+     reloc.type == R_NANOMIPS_GOT_DISP ||
+     reloc.type == R_NANOMIPS_GOT_PAGE ||
+     reloc.type == R_NANOMIPS_TLS_GD ||
+     reloc.type == R_NANOMIPS_TLS_GOTTPREL)
+     return nullptr;
+  
+  // Expand all non resolvable relocs
+  llvm::outs() << "Here 2\n";
+  if(isec->nanoMipsRelaxAux->resolveReloc[relNum] != RELOC_RESOLVE)
+    return this->getExpandTransformTemplate(insProperty, reloc, insn, isec);
+  
+  const NanoMipsTransformTemplate *ret = NanoMipsTransformExpand::getTransformTemplate(insProperty, relNum, valueToRelocate, insn, isec);
+
+  // We can't resolve this relocation so we return it to default state
+  llvm::outs() << "Here 3\n";
+  if(ret != nullptr) isec->nanoMipsRelaxAux->resolveReloc[relNum] = RELOC_COPY;
+
+  return ret;
+}
+
+
 // NanoMipsTransformController
 
 void NanoMipsTransformController::initState()
 {
   if(config->relax)
-  { 
-    this->currentState = &this->transformRelax;
+  {
+    if((config->nanoMipsFinalizePCRelRelocs || config->nanoMipsFinalizeRelocs) && config->relocatable)
+      this->currentState = &this->transformRelaxFinalize;
+    else
+      this->currentState = &this->transformRelax;
   }
-  else if(config->expand) this->currentState = &this->transformExpand;
+  else if(config->expand)
+  { 
+    if((config->nanoMipsFinalizePCRelRelocs || config->nanoMipsFinalizeRelocs) && config->relocatable)
+      this->currentState = &this->transformExpandFinalize;
+    else
+      this->currentState = &this->transformExpand;
+  }
   else this->currentState = &this->transformNone;
 
   LLVM_DEBUG(llvm::dbgs() << "Initial state of transform: " << this->currentState->getTypeAsString() << "\n");
@@ -1124,24 +1186,33 @@ void NanoMipsTransformController::changeState(int pass)
     this->currentState->resetChangedThisIteration();
     return;
   }
-  if((notExpandedYet || this->currentState->getChanged()) && this->currentState->getType() == NanoMipsTransform::TransformRelax && config->expand)
+  else if((notExpandedYet || this->currentState->getChanged()) && this->currentState->getType() == NanoMipsTransform::TransformRelax && config->expand)
   {
     notExpandedYet = false;
     this->currentState->resetChanged();
-    this->currentState = &this->transformExpand;
+    if(config->relocatable && (config->nanoMipsFinalizePCRelRelocs || config->nanoMipsFinalizeRelocs))
+      this->currentState = &this->transformExpandFinalize;
+    else
+      this->currentState = &this->transformExpand;
+    
     LLVM_DEBUG(llvm::dbgs() << "Changed transform state to Expand\n");
     return;
   }
 
-  if(this->currentState->getChanged() && this->currentState->getType() == NanoMipsTransform::TransformExpand && config->relax && pass < relaxPassLimit)
+  else if(this->currentState->getChanged() && this->currentState->getType() == NanoMipsTransform::TransformExpand && config->relax && pass < relaxPassLimit)
   {
     this->currentState->resetChanged();
-    this->currentState = &this->transformRelax;
+    if(config->relocatable && (config->nanoMipsFinalizePCRelRelocs || config->nanoMipsFinalizeRelocs))
+      this->currentState = &this->transformRelaxFinalize;
+    else
+      this->currentState = &this->transformRelax;
     LLVM_DEBUG(llvm::dbgs() << "Changed transform state to Relax\n");
     return;
   }
-
-  this->currentState->resetChanged();
-  this->currentState = &this->transformNone;
-  LLVM_DEBUG(llvm::dbgs() << "Changed transform state to None\n";);
+  else
+  {
+    this->currentState->resetChanged();
+    this->currentState = &this->transformNone;
+    LLVM_DEBUG(llvm::dbgs() << "Changed transform state to None\n";);
+  }
 }

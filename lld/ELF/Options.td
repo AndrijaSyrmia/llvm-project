@@ -749,6 +749,16 @@ defm expand_reg: EEq<"expand-reg",
     "(nanoMIPS only) Set the register that will be used in expansions (default $1 - pass the value without dollar sign)"
 >;
 
+defm finalize_pcrel_relocs: BB<"finalize-pcrel-relocs",
+  "(nanoMIPS only) Finalize pc-relative relocations in relocatable output",
+  "(nanoMIPS only) Do not finalize pc-relative relocations in relocatable output (default)"
+>;
+
+defm finalize_relocs: BB<"finalize-relocs",
+  "(nanoMIPS only) Finalize relocations in relocatable output (not including pcrel)",
+  "(nanoMIPS only) Do not finalize relocations in relocatable output (not including pcrel) (default)"
+>;
+
 // Hidden option used for testing MIPS multi-GOT implementation.
 defm mips_got_size:
   Eq<"mips-got-size", "Max size of a single MIPS GOT. 0x10000 by default.">,

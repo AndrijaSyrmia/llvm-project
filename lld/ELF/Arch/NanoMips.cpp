@@ -176,6 +176,8 @@ NanoMips<ELFT>::NanoMips(): currentTransformation(&insPropertyTable) {
   llvm::dbgs() << "fix_nmips_hw113064: " << config->nanoMipsFixHw113064 << "\n";
   llvm::dbgs() << "expand_reg: " << config->nanoMipsExpandReg << "\n";
   llvm::dbgs() << "strict_address_modes: " << config->nanoMipsStrictAddressModes << "\n";
+  llvm::dbgs() << "finalize_pcrel_relocs: " << config->nanoMipsFinalizePCRelRelocs << "\n";
+  llvm::dbgs() << "finalize_relocs: " << config->nanoMipsFinalizeRelocs << "\n";
   );
   this->currentTransformation.initState();
 }
@@ -443,9 +445,8 @@ TargetInfo *elf::getNanoMipsTargetInfo() {
 template <class ELFT>
 bool NanoMips<ELFT>::mayRelax() const
 {
-  // TODO: When the finalize-relocs option is added, change this expression
-  // also goes for sort-by-reference option
-  return (!config->relocatable && (config->relax || config->expand));
+  // TODO: When the sort-by-reference option is added
+  return ((!config->relocatable || config->nanoMipsFinalizeRelocs || config->nanoMipsFinalizePCRelRelocs) && (config->relax || config->expand));
 }
 
 template <class ELFT>
@@ -459,7 +460,10 @@ bool NanoMips<ELFT>::safeToModify(InputSection *sec) const
   return modifiable;
 }
 
-// TODO: Emit reloc option, somewhat different transformations
+// TODO: relocatable option, somewhat different transformations
+// Here in the relaxation process we'll also perform finalizing of relocs
+// if the finalize-pcrel-relocs or finalize-relocs option is given, if the relaxations
+// are prohibited we won't be doing this
 template <class ELFT>
 bool NanoMips<ELFT>::relaxOnce(int pass) const
 {
@@ -578,13 +582,14 @@ void NanoMips<ELFT>::transform(InputSection *sec) const
 
     // Note: Will skip symbol calculation as well, we calculate them through getRelocTargetVA 
     // TODO: Return to this later, and see if somethings need to be fixed
-
-    // TODO: Discarded sections?
+    // TODO: Should we even check for symbols belonging to discarded sections here, as it refers
+    // to debug sections and these sections have data relocations which are not transformable
+    // (this is done in gold)
 
     // Ignore undef weak symbols
     if(reloc.sym && reloc.sym->isUndefWeak())
       continue;
-    const NanoMipsTransformTemplate *transformTemplate = this->currentTransformation.getTransformTemplate(insProperty, reloc, valueToRelocate, insn, sec);
+    const NanoMipsTransformTemplate *transformTemplate = this->currentTransformation.getTransformTemplate(insProperty, relNum, valueToRelocate, insn, sec);
 
     if(!transformTemplate) continue;
     LLVM_DEBUG( 
@@ -620,16 +625,65 @@ void NanoMips<ELFT>::initTransformAuxInfo() const
   SmallVector<InputSection *, 0> storage;
   for(OutputSection *osec: outputSections)
   {
+    llvm::outs() << "Osec: " << osec->name << "\n";
     if((osec->flags & (SHF_EXECINSTR | SHF_ALLOC)) != (SHF_EXECINSTR | SHF_ALLOC) ||
           !(osec->type & SHT_PROGBITS))
           continue;
-    
+    llvm::outs() << "Osec: " << osec->name << "\n";
     for(InputSection *sec : getInputSections(*osec, storage))
     {
+      llvm::outs() << sec->name << "<-" << (sec->file ? sec->file->getName() : "noobj") << "\n";
+      llvm::outs() << this->safeToModify(sec) << ":" << sec->relocations.size() << "\n";
       if(!this->safeToModify(sec) || sec->relocations.size() == 0) continue;
+      llvm::outs() << sec->name << "\n";
       sec->nanoMipsRelaxAux = make<NanoMipsRelaxAux>();
       sec->nanoMipsRelaxAux->prevBytesDropped = sec->bytesDropped;
       sec->bytesDropped = 0;
+
+      llvm::outs() << config->relocatable << ":" << config->nanoMipsFinalizePCRelRelocs << ":" << config->nanoMipsFinalizeRelocs << "\n";
+      if(config->relocatable && (config->nanoMipsFinalizePCRelRelocs || config->nanoMipsFinalizeRelocs))
+      {
+        llvm::outs() << "Heeey\n";
+        // Check to see which relocs could be resolved or discarded
+        sec->nanoMipsRelaxAux->resolveReloc.reserve(sec->relocations.size());
+        for(Relocation &rel: sec->relocations)
+        {
+          // TODO: Check if this kind of section comparison is valid
+          llvm::outs() << rel.sym->getName() << ":" << rel.sym->getOutputSection()->sectionIndex << "---" << osec->sectionIndex << "\n";
+          if(config->nanoMipsFinalizePCRelRelocs && rel.sym->getOutputSection()->sectionIndex == osec->sectionIndex &&
+            (rel.type == R_NANOMIPS_PC_I32 ||
+             rel.type == R_NANOMIPS_PC25_S1 ||
+             rel.type == R_NANOMIPS_PC21_S1 ||
+             rel.type == R_NANOMIPS_PC14_S1 ||
+             rel.type == R_NANOMIPS_PC11_S1 ||
+             rel.type == R_NANOMIPS_PC10_S1 ||
+             rel.type == R_NANOMIPS_PC7_S1 ||
+             rel.type == R_NANOMIPS_PC4_S1))
+          {
+                llvm::outs() << "RESOLVE ADDED\n";
+                sec->nanoMipsRelaxAux->resolveReloc.push_back(RELOC_RESOLVE);
+          }
+
+          // TODO: Check if this should also count for non allocatable, execinstr sections
+          // Probably should, but leave it like this for now
+          else if(config->nanoMipsFinalizeRelocs && !rel.sym->isSection() && rel.sym->isLocal() && 
+          (rel.type == R_NANOMIPS_ALIGN ||
+           rel.type == R_NANOMIPS_FILL ||
+           rel.type == R_NANOMIPS_MAX ||
+           rel.type == R_NANOMIPS_INSN32 ||
+           rel.type == R_NANOMIPS_INSN16 ||
+           rel.type == R_NANOMIPS_FIXED ||
+           rel.type == R_NANOMIPS_RELAX ||
+           rel.type == R_NANOMIPS_NORELAX))
+          {
+            llvm::outs() << "DISCARD ADDED\n";
+            sec->nanoMipsRelaxAux->resolveReloc.push_back(RELOC_DISCARD);
+            continue;
+          }
+          else
+            sec->nanoMipsRelaxAux->resolveReloc.push_back(RELOC_COPY);
+        }
+      }
     }
   }
 
@@ -743,6 +797,8 @@ void NanoMips<ELFT>::align(InputSection *sec, Relocation &reloc, uint32_t relNum
   }
 }
 
+// TODO: Check whether we will further change the layout, in that case
+// resolving some relocations may not be okay.
 template <class ELFT>
 void NanoMips<ELFT>::finalizeRelaxations() const {
   // Return previous bytesDropped values
@@ -767,6 +823,77 @@ void NanoMips<ELFT>::finalizeRelaxations() const {
       }
       sec->bytesDropped = sec->nanoMipsRelaxAux->prevBytesDropped;
     }
+  }
+
+  // Rewrite reloc sections if relocatable + finalization of relocations, not to include
+  // some relocations in output file
+  if(config->relocatable && (config->nanoMipsFinalizePCRelRelocs || config->nanoMipsFinalizeRelocs))
+  {
+      llvm::outs() << "Rewriting!\n";
+      for(InputSectionBase *relIsecBase: ctx.inputSections)
+      {
+        if(relIsecBase->type == SHT_REL || relIsecBase->type == SHT_RELA)
+        {
+          llvm::outs() << "\t" << relIsecBase->name << "\n";
+          assert(relIsecBase->type == SHT_RELA && "Only rela relocations are now supported for nanoMIPS");
+          if(auto *relIsec = dyn_cast_or_null<InputSection>(relIsecBase))
+          {
+            if(auto *isec = dyn_cast_or_null<InputSection>(relIsec->getRelocatedSection()))
+            {
+              if(isec->nanoMipsRelaxAux && isec->nanoMipsRelaxAux->resolveReloc.size())
+              {
+                uint32_t originalRelNum = isec->relocations.size();
+                uint32_t newRelNum = 0;
+
+                for(size_t i = 0; i < isec->nanoMipsRelaxAux->resolveReloc.size(); i++)
+                  if(isec->nanoMipsRelaxAux->resolveReloc[i] == RELOC_COPY) newRelNum++;
+
+                // TODO: The rels have might changed also this should be checked as well,
+                // so we need to update them regardless
+                if(originalRelNum == newRelNum)
+                  continue;
+                
+                size_t newSize = newRelNum * sizeof(typename ELFT::Rela);
+
+                uint8_t *newRelocs = nullptr;
+                {
+                  // TODO: Check if mutex is necessary, as this is not concurrent
+                  static std::mutex mu;
+                  std::lock_guard<std::mutex> lock(mu);
+
+                  newRelocs = context().bAlloc.Allocate<uint8_t>(newSize);
+                }
+
+                if(!newRelocs) error("Allocation of new relocatable reloc section failed");
+
+                relIsec->content_ = newRelocs;
+                relIsec->size = newSize;
+                uint8_t *p = newRelocs;
+
+                for(size_t i = 0; i < isec->relocations.size(); i++)
+                {
+                  if(isec->nanoMipsRelaxAux->resolveReloc[i] != RELOC_COPY) continue;
+                  const Relocation &rel = isec->relocations[i];
+
+
+                  typename ELFT::Rela rela;
+
+                  rela.r_offset = rel.offset;
+                  rela.r_info = (in.symTab->getSymbolIndex(rel.sym) << 8) | rel.type;
+                  rela.r_addend = rel.addend;
+
+                  memcpy(p, &rela, sizeof(typename ELFT::Rela));
+                  p += sizeof(typename ELFT::Rela);
+                }
+
+
+
+              }
+            }
+          }
+
+        }
+      }
   }
 }
 
