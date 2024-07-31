@@ -247,6 +247,8 @@ NanoMips<ELFT>::NanoMips() : currentTransformation(&insPropertyTable) {
 
   assert(config->nanoMipsExpandReg >= 0 && config->nanoMipsExpandReg < 32 &&
          "nanoMIPS regs range from 0 to 32");
+  //  TODO: Check out if more of other relocs should be initialized
+  // symbolicRel, iRelativeRel, relativeRel, etc.
   copyRel = R_NANOMIPS_COPY;
   defaultMaxPageSize = 65536;
   pltEntrySize = 0;
@@ -272,6 +274,7 @@ NanoMips<ELFT>::NanoMips() : currentTransformation(&insPropertyTable) {
 template <class ELFT>
 RelExpr NanoMips<ELFT>::getRelExpr(RelType type, const Symbol &s,
                                    const uint8_t *loc) const {
+  // TODO: Other relocations
   switch (type) {
   case R_NANOMIPS_PC25_S1:
   case R_NANOMIPS_PC21_S1:
