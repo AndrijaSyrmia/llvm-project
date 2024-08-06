@@ -21,6 +21,7 @@
 # CHECK-NEXT: 60a3{{.*}} lapc a1,{{.*}} <addr_fix_abs>
 # CHECK: 60c3{{.*}} lapc a2,{{.*}} <addr_fix_abs>
 # CHECK: 20{{.*}} addu a1,a1,a2
+# CHECK: 60e3{{.*}} lapc a3,{{.*}}
 
 # CHECK-NO-FIX: 60a3{{.*}} lapc {{.*}} <addr_fix>
 # CHECK-NO-FIX: 60af{{.*}} swpc {{.*}} <addr_fix+0x6>
@@ -28,6 +29,7 @@
 # CHECK-NO-FIX: 04c{{.*}} lapc {{.*}} <far_negative>
 # CHECK-NO-FIX: 60a0{{.*}} li a1,{{.*}}
 # CHECK-NO-FIX: 60a1{{.*}} addiu a1,a1,{{.*}}
+# CHECK-NO-FIX: 60e0{{.*}} li a3,{{.*}}
 
 # expand R_NANOMIPS_PC_I32
 # also tests relax R_NANOMIPS_PC_I32
@@ -61,5 +63,21 @@ addr_fix_abs:
     .align 1
 addr_fix:
 
+    .section .first_transform_no_byte_count_change, "ax", @progbits
+    .align 1
+
+    .globl fun
+    .ent fun
+
+fun:
+    # Test for big obj files
+    .skip 0x7e0000
+    li $a3, addr_fix_abs
+    .end fun
+    .size fun, .-fun
+
+    
 .equ far_positive, 0x201012
 .equ far_negative, 0xffe01018
+.equ first_transform, 0x20000001
+

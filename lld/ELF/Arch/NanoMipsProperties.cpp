@@ -455,7 +455,11 @@ void NanoMipsTransform::updateSectionContent(InputSection *isec,
                                              uint64_t location, int32_t delta,
                                              bool align) {
 
+  // Other than increasing/decreasing byte size of isec, it also
+  // allocates new section content if delta is 0 and section
+  // hasn't yet been changed, as those content would be readonly
   changeBytes(isec, location, delta);
+  if(delta == 0) return;
 
   this->changed = true;
   this->changedThisIteration = true;

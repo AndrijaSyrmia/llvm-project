@@ -607,9 +607,9 @@ template <class ELFT> void NanoMips<ELFT>::transform(InputSection *sec) const {
 
     // Bytes to remove/add
     int32_t delta = transformTemplate->getSizeOfTransform() - instSize;
-    if (delta != 0)
-      this->currentTransformation.updateSectionContent(
-          sec, relocOffset + instSize, delta);
+
+    this->currentTransformation.updateSectionContent(
+        sec, relocOffset + instSize, delta);
 
     // Transform
     // Note: Reloc may be invalidated, but we don't need it from this point on
