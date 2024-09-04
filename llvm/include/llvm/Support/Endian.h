@@ -392,6 +392,10 @@ template <typename T, endianness E> inline void write(void *P, T V) {
   *(detail::packed_endian_specific_integral<T, E, unaligned> *)P = V;
 }
 
+inline void write8(void *P, uint8_t V) {
+  // For a byte to write, it doesn't matter what endianess it is
+  write<uint8_t>(P, V, endianness::little);
+}
 inline void write16(void *P, uint16_t V, endianness E) {
   write<uint16_t>(P, V, E);
 }
