@@ -1154,6 +1154,9 @@ static void readConfigs(opt::InputArgList &args) {
       args.hasFlag(OPT_merge_exidx_entries, OPT_no_merge_exidx_entries, true);
   config->mmapOutputFile =
       args.hasFlag(OPT_mmap_output_file, OPT_no_mmap_output_file, true);
+  config->nanoMipsCustomLinkerScriptType =
+      args.hasFlag(OPT_nanomips_custom_linker_script_type,
+                   OPT_no_nanomips_custom_linker_script_type, false);
   config->nanoMipsFixHw110880 =
       args.hasFlag(OPT_fix_nmips_hw110880, OPT_no_fix_nmips_hw110880, false);
   config->nanoMipsFixHw113064 =

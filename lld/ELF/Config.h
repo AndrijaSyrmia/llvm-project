@@ -230,6 +230,7 @@ struct Config {
   bool mergeArmExidx;
   bool mipsN32Abi = false;
   bool mmapOutputFile;
+  bool nanoMipsCustomLinkerScriptType;
   bool nanoMipsFixHw110880;
   bool nanoMipsFixHw113064;
   bool nanoMipsInsn32;
