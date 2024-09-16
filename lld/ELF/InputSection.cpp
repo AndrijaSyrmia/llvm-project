@@ -22,6 +22,7 @@
 #include "llvm/Support/xxhash.h"
 #include <algorithm>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 using namespace llvm;
@@ -1231,6 +1232,43 @@ void EhInputSection::split(ArrayRef<RelTy> rels) {
       break;
     }
     uint64_t size = endian::read32<ELFT::TargetEndianness>(d.data());
+
+    if (config->emachine == EM_NANOMIPS) {
+      // nanoMIPS may have an unresolved relocation for size of CIE/FDE,
+      // calculate the value here, so proper values can be used
+      const uint64_t off = d.data() - content().data();
+      std::optional<uint64_t> calculatedVal = std::nullopt;
+      const unsigned bits = sizeof(typename ELFT::uint) * 8;
+      std::optional<ArrayRef<RelTy>> relsNotLessThanOffset = std::nullopt;
+      for (auto [i, rel] : llvm::enumerate(rels)) {
+        if (rel.r_offset < off)
+          continue;
+        relsNotLessThanOffset = rels.slice(i);
+        break;
+      }
+
+      if (relsNotLessThanOffset) {
+        for (auto [i, rel] : llvm::enumerate(*relsNotLessThanOffset)) {
+          // Resolving (composite) nanoMIPS relocation
+          if (rel.r_offset != off)
+            break;
+          if (!calculatedVal)
+            calculatedVal = getAddend<ELFT>(rel);
+          Symbol &sym = getFile<ELFT>()->getRelocTargetSym(rel);
+          RelType type = rel.getType(config->isMips64EL);
+          RelExpr expr = target->getRelExpr(type, sym, 0);
+          assert(expr != R_PC && expr != R_NANOMIPS_PAGE_PC &&
+                 "PC relocs not expected for determining size of .eh_frame "
+                 "entries");
+          calculatedVal = SignExtend64<bits>(
+              getRelocTargetVA(file, type, *calculatedVal, 0, sym, expr));
+        }
+      }
+      // If the relocation exists, use its calculated value
+      // for the size
+      if (calculatedVal)
+        size = *calculatedVal;
+    }
     if (size == 0) // ZERO terminator
       break;
     uint32_t id = endian::read32<ELFT::TargetEndianness>(d.data() + 4);
