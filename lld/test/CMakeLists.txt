@@ -57,6 +57,15 @@ if (NOT LLD_BUILT_STANDALONE)
     endif()
 endif()
 
+file(GLOB NANOMIPS_TESTS CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/ELF/nanomips*
+)
+
+add_lit_testsuite(check-lld-nanomips "Running lld nanomips test suite"
+    ${NANOMIPS_TESTS}
+    DEPENDS ${LLD_TEST_DEPS}
+)
+
 add_lit_testsuite(check-lld "Running lld test suite"
   ${CMAKE_CURRENT_BINARY_DIR}
   DEPENDS ${LLD_TEST_DEPS}
