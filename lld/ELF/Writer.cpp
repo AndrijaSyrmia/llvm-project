@@ -2255,6 +2255,15 @@ template <class ELFT> void Writer<ELFT>::addStartEndSymbols() {
   define("__init_array_start", "__init_array_end", Out::initArray);
   define("__fini_array_start", "__fini_array_end", Out::finiArray);
 
+  if (config->emachine == EM_NANOMIPS) {
+    if (OutputSection *sec = findSection(".eh_frame")) {
+      define("__eh_frame_start", "__eh_frame_end", sec);
+
+      if (OutputSection *sec = findSection(".eh_frame_hdr"))
+        define("__eh_frame_hdr_start", "__eh_frame_hdr_end", sec);
+    }
+  }
+
   if (OutputSection *sec = findSection(".ARM.exidx"))
     define("__exidx_start", "__exidx_end", sec);
 }
