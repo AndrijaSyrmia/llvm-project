@@ -105,7 +105,7 @@ struct VersionDefinition {
 class LinkerDriver {
 public:
   void linkerMain(ArrayRef<const char *> args);
-  void addFile(StringRef path, bool withLOption);
+  void addFile(StringRef path, bool withLOption, bool toBeginning);
   void addLibrary(StringRef name);
 
 private:

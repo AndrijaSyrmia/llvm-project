@@ -358,11 +358,13 @@ static void addDependentLibrary(StringRef specifier, const InputFile *f) {
   if (!config->dependentLibraries)
     return;
   if (std::optional<std::string> s = searchLibraryBaseName(specifier))
-    ctx.driver.addFile(saver().save(*s), /*withLOption=*/true);
+    ctx.driver.addFile(saver().save(*s), /*withLOption=*/true,
+                       /*toBeginning=*/false);
   else if (std::optional<std::string> s = findFromSearchPaths(specifier))
-    ctx.driver.addFile(saver().save(*s), /*withLOption=*/true);
+    ctx.driver.addFile(saver().save(*s), /*withLOption=*/true,
+                       /*toBeginning=*/false);
   else if (fs::exists(specifier))
-    ctx.driver.addFile(specifier, /*withLOption=*/false);
+    ctx.driver.addFile(specifier, /*withLOption=*/false, /*toBeginning=*/false);
   else
     error(toString(f) +
           ": unable to find library from dependent library specifier: " +
